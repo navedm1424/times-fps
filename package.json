@@ -6,7 +6,21 @@
   "author": "Naved <navedm1424@gmail.com>",
   "type": "module",
   "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    "./exporter": {
+      "node": "./dist/exporter/frame-exporter-node.runtime.js",
+      "default": "./dist/exporter/frame-exporter.js"
+    }
+  },
+  "sideEffects": false,
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "rm -rf dist/ && tsc && rm -rf dist/**/*.types.js && rm -rf dist/**/*.runtime.d.ts",
+    "test": "vitest --run tests"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.5",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
   }
 }
