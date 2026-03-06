@@ -3,14 +3,12 @@ import {
     createFrameSampler,
     cubicBezierEasing,
     easeIn,
-    type FrameValueResolver,
     type Playhead,
     Segment,
     Sequence,
 } from "../src/index.js";
 import {createTimelineInspector} from "../src/timeline-inspector.runtime.js";
 import {createInterpolator} from "../src/interpolator.runtime.js";
-import {FrameExporter} from "../src/exporter/frame-exporter-node.runtime.js";
 
 describe("easing", () => {
     describe("cubicBezierEasing", () => {
@@ -275,7 +273,7 @@ describe("Interpolator", () => {
     });
 });
 
-describe("FrameRenderer", () => {
+describe("FrameSampler", () => {
     const sampler = createFrameSampler((tl, _) => {
         return {
             x: 100 * tl.playhead.time,
@@ -296,37 +294,5 @@ describe("FrameRenderer", () => {
         expect(frames.fps).toBe(60);
         expect(frames.frames.length).toBe(300);
         expect(frames.frames[0]!.value).toStrictEqual({ x: 0, y: 0 });
-    });
-    it("exportToJson in Node writes JSON file", async () => {
-        const animated = createFrameSampler((_, __) => {
-            return {
-                x: 10,
-                y: 0
-            };
-        });
-        const frames = animated.collect({ duration: 1 });
-        const outPath = await FrameExporter.exportToJson(frames, "test-output-times-fps", "frames");
-        expect(outPath).toMatch(/frames\.json$/);
-        const fs = await import("fs");
-        const data = JSON.parse(fs.readFileSync(outPath, "utf8"));
-        expect(data.frames).toBeDefined();
-        expect(data.fps).toBe(60);
-        fs.rmSync("test-output-times-fps", { recursive: true, force: true });
-    });
-    it("exportToJson in Node writes JSON file", async () => {
-        const animated = createFrameSampler((_, __) => {
-            return {
-                x: 10,
-                y: 0
-            };
-        });
-        const outPath = await FrameExporter.exportToJson(animated.sampleAt(0), "test-output-path", "path-export");
-        expect(outPath).toMatch(/path-export\.json$/);
-        const fs = await import("fs");
-        const content = fs.readFileSync(outPath, "utf8");
-        const data = JSON.parse(content);
-        expect(data.value).toBeDefined();
-        expect(typeof data.value).toBe("object");
-        fs.rmSync("test-output-path", { recursive: true, force: true });
     });
 });

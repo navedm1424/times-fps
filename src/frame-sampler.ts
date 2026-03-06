@@ -79,7 +79,7 @@ class FrameSamplerImpl<T extends FrameValue> implements FrameSampler<T> {
         this.#resolveFrame = func;
         this.#time = 0;
         const thisInstance = this;
-        const playhead = { get time() { return thisInstance.#time; } };
+        const playhead: Playhead = { get time() { return thisInstance.#time; } };
         this.#timelineInspector = createTimelineInspector(playhead);
         this.#interpolator = createInterpolator(playhead);
     }

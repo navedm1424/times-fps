@@ -1,42 +1,44 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import {existsSync, readFileSync, rmSync} from "node:fs";
-import {join} from "node:path";
+import { describe, it, expect } from "vitest";
+import {createFrameSampler} from "../src/index.js";
+import {FrameExporter as FrameExporterNode} from "../src/exporter/frame-exporter-node.runtime.js";
+import {FrameExporter} from "../src/exporter/frame-exporter.js";
 
-describe("exporter", () => {
-    const testDir = join(process.cwd(), "test-output-file-utils");
-
-    beforeEach(() => {
-        if (existsSync(testDir)) rmSync(testDir, { recursive: true });
+describe(`${FrameExporterNode.exportToJson.name}`, () => {
+    it("writes JSON file in Node", async () => {
+        const animated = createFrameSampler((_, __) => {
+            return {
+                x: 10,
+                y: 0
+            };
+        });
+        const frames = animated.collect({ duration: 1 });
+        const outPath = await FrameExporterNode.exportToJson(frames, "test-output-times-fps", "frames");
+        expect(outPath).toMatch(/frames\.json$/);
+        const fs = await import("fs");
+        const data = JSON.parse(fs.readFileSync(outPath, "utf8"));
+        expect(data.frames).toBeDefined();
+        expect(data.fps).toBe(60);
+        fs.rmSync("test-output-times-fps", { recursive: true, force: true });
     });
-
-    afterEach(() => {
-        if (existsSync(testDir)) rmSync(testDir, { recursive: true });
+    it("writes JSON file in Node", async () => {
+        const animated = createFrameSampler((_, __) => {
+            return {
+                x: 10,
+                y: 0
+            };
+        });
+        const outPath = await FrameExporterNode.exportToJson(animated.sampleAt(0), "test-output-path", "path-export");
+        expect(outPath).toMatch(/path-export\.json$/);
+        const fs = await import("fs");
+        const content = fs.readFileSync(outPath, "utf8");
+        const data = JSON.parse(content);
+        expect(data.value).toBeDefined();
+        expect(typeof data.value).toBe("object");
+        fs.rmSync("test-output-path", { recursive: true, force: true });
     });
-
-    // describe("writeJsonFile", () => {
-    //     it("throws on invalid output directory path", async () => {
-    //         await expect(writeJsonFile("", "file", {})).rejects.toThrow("Invalid output directory path");
-    //         await expect(writeJsonFile(null as any, "file", {})).rejects.toThrow();
-    //     });
-    //     it("throws on invalid output file name", async () => {
-    //         await expect(writeJsonFile(".", "", {})).rejects.toThrow("Invalid output file name");
-    //         await expect(writeJsonFile(".", null as any, {})).rejects.toThrow();
-    //     });
-    //     it("creates directory and writes JSON file", async () => {
-    //         const filePath = await writeJsonFile(testDir, "test", { foo: "bar", n: 1 });
-    //         expect(filePath).toBe(join(testDir, "test.json"));
-    //         expect(existsSync(filePath)).toBe(true);
-    //         const content = readFileSync(filePath, "utf8");
-    //         const data = JSON.parse(content);
-    //         expect(data.foo).toBe("bar");
-    //         expect(data.n).toBe(1);
-    //     });
-    //     it("creates nested directory when recursive", async () => {
-    //         const nested = join(testDir, "a", "b");
-    //         const filePath = await writeJsonFile(nested, "nested", { x: 1 });
-    //         expect(existsSync(filePath)).toBe(true);
-    //         expect(JSON.parse(readFileSync(filePath, "utf8")).x).toBe(1);
-    //     });
-    // });
+    it("errors out outside of Node", async () => {
+        await expect(async () => {
+            return FrameExporter.exportToJson({ time: 0, value: "" }, "", "");
+        }).rejects.toThrow("only run in Node");
+    });
 });
-

@@ -1,7 +1,16 @@
 {
   "name": "times-fps",
   "version": "1.0.0",
-  "description": "A small utility for creating complex animations and generating its frames.",
+  "description": "A tiny frame-sampling toolkit with timeline, easing, and interpolation utilities.",
+  "keywords": [
+    "animation",
+    "timeline",
+    "frames",
+    "fps",
+    "easing",
+    "interpolation",
+    "interpolator"
+  ],
   "license": "MIT",
   "author": "Naved <navedm1424@gmail.com>",
   "type": "module",
@@ -13,10 +22,14 @@
       "default": "./dist/exporter/frame-exporter.js"
     }
   },
+  "files": ["dist"],
   "sideEffects": false,
   "scripts": {
-    "build": "rm -rf dist/ && tsc && rm -rf dist/**/*.types.js && rm -rf dist/**/*.runtime.d.ts",
-    "test": "vitest --run tests"
+    "build": "rm -rf dist/ && tsc && rm -rf dist/**/*.types.js && rm -rf dist/**/*.runtime.d.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/navedm1424/times-fps.git"
   },
   "devDependencies": {
     "@types/node": "^25.3.5",
