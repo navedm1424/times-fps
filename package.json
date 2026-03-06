@@ -1,0 +1,12 @@
+{
+  "name": "times-fps",
+  "version": "1.0.0",
+  "description": "A small utility for creating complex animations and generating its frames.",
+  "license": "MIT",
+  "author": "Naved <navedm1424@gmail.com>",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  }
+}
