@@ -5,7 +5,7 @@ import {FrameExporter} from "../src/exporter/frame-exporter.js";
 
 describe(`${FrameExporterNode.exportToJson.name}`, () => {
     it("writes JSON file in Node", async () => {
-        const animated = createFrameSampler((_, __) => {
+        const animated = createFrameSampler(_ => {
             return {
                 x: 10,
                 y: 0
@@ -21,7 +21,7 @@ describe(`${FrameExporterNode.exportToJson.name}`, () => {
         fs.rmSync("test-output-times-fps", { recursive: true, force: true });
     });
     it("writes JSON file in Node", async () => {
-        const animated = createFrameSampler((_, __) => {
+        const animated = createFrameSampler(_ => {
             return {
                 x: 10,
                 y: 0
@@ -38,7 +38,7 @@ describe(`${FrameExporterNode.exportToJson.name}`, () => {
     });
     it("errors out outside of Node", async () => {
         await expect(async () => {
-            return FrameExporter.exportToJson({ time: 0, value: "" }, "", "");
+            return FrameExporter.exportToJson({ progress: 0, value: "" }, "", "");
         }).rejects.toThrow("only run in Node");
     });
 });

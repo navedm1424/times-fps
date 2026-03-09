@@ -1,13 +1,13 @@
 import type {Interpolator} from "./interpolator.types.js";
 import type {TimelineInspector} from "./timeline-inspector.types.js";
-import {createInterpolator} from "./interpolator.runtime.js";
 import type {EasingFunction} from "./easing.js";
 import {saturate} from "./utils/numbers.js";
+import {createInterpolator} from "./interpolator.runtime.js";
 import {createTimelineInspector} from "./timeline-inspector.runtime.js";
 
-export interface Playhead {
+export type TimelineProgress = {
     /** normalized time 0 → 1 */
-    get time(): number;
+    get value(): number;
 }
 
 export type FrameValue =
@@ -16,20 +16,20 @@ export type FrameValue =
     | FrameValue[]
     | { [key: string]: FrameValue };
 
-export type FrameValueResolver<T extends FrameValue> = (ti: TimelineInspector, map: Interpolator) => T;
+export type FrameResolver<T extends FrameValue> = (progress: TimelineProgress) => T;
 
-export interface Frame<T extends FrameValue> {
-    readonly time: number;
+export type Frame<T extends FrameValue> = {
+    readonly progress: number;
     readonly value: T;
 }
 
-export interface FramesData<T extends FrameValue> {
+export type FramesData<T extends FrameValue> = {
     readonly duration: number;
     readonly fps: number;
     readonly frames: ReadonlyArray<Frame<T>>
 }
 
-export interface FrameSamplingOptions {
+export type FrameSamplingOptions = {
     duration?: number;
     easing?: EasingFunction;
     fps?: number;
@@ -53,43 +53,23 @@ function* stepper({ duration = 1, fps = 60, easing }: FrameSamplingOptions = {})
     if (!Number.isFinite(fps) || fps <= 0)
         throw new Error("fps must be > 0 and finite.");
 
-    const noOfFrames = Math.floor(duration * fps);
-    if (noOfFrames < 1)
+    const frameCount = Math.floor(duration * fps);
+    if (frameCount < 1)
         return;
     yield easing ? saturate(easing(0)) : 0;
-    if (noOfFrames === 1)
+    if (frameCount === 1)
         return;
 
-    const step = 1 / (noOfFrames - 1);
-    let progress = step;
+    const step = 1 / (frameCount - 1);
 
-    do {
-        yield easing ? saturate(easing(progress)) : progress;
-        progress += step;
-    } while (progress <= 1);
+    for (let i = 1; i < frameCount; i++) {
+        const t = i * step;
+        yield easing ? saturate(easing(t)) : t;
+    }
 }
 
-class FrameSamplerImpl<T extends FrameValue> implements FrameSampler<T> {
-    readonly #resolveFrame: FrameValueResolver<T>;
-    #time: number;
-    readonly #timelineInspector: TimelineInspector;
-    readonly #interpolator: Interpolator;
-
-    constructor(func: FrameValueResolver<T>) {
-        this.#resolveFrame = func;
-        this.#time = 0;
-        const thisInstance = this;
-        const playhead: Playhead = { get time() { return thisInstance.#time; } };
-        this.#timelineInspector = createTimelineInspector(playhead);
-        this.#interpolator = createInterpolator(playhead);
-    }
-
-    sampleAt(time: number): Frame<T> {
-        return {
-            time: this.#time = saturate(time),
-            value: this.#resolveFrame(this.#timelineInspector, this.#interpolator)
-        }
-    }
+abstract class AbstractFrameSampler<T extends FrameValue> implements FrameSampler<T> {
+    abstract sampleAt(t: number): Frame<T>;
 
     *iterate(options: FrameSamplingOptions = {}): Generator<Frame<T>> {
         for (const t of stepper(options))
@@ -102,6 +82,41 @@ class FrameSamplerImpl<T extends FrameValue> implements FrameSampler<T> {
     }
 }
 
-export function createFrameSampler<T extends FrameValue>(func: FrameValueResolver<T>): FrameSampler<T> {
-    return new FrameSamplerImpl(func);
+export function createFrameSampler<T extends FrameValue>(resolveFrame: FrameResolver<T>): FrameSampler<T> {
+    let progressValue = 0;
+    const progress = Object.freeze({
+        get value() {
+            return progressValue;
+        }
+    });
+    class FrameSamplerImpl extends AbstractFrameSampler<T> {
+        sampleAt(t: number): Frame<T> {
+            return {
+                progress: progressValue = saturate(t),
+                value: resolveFrame(progress)
+            };
+        }
+    }
+    return new FrameSamplerImpl();
+}
+
+function getOrInsertComputed<V>(map: WeakMap<TimelineProgress, V>, key: TimelineProgress, callback: (k: TimelineProgress) => V): V {
+    if (map.has(key))
+        return map.get(key)!;
+
+    const computed = callback(key);
+    map.set(key, computed);
+    return computed;
+}
+
+const interpolatorMap = new WeakMap<TimelineProgress, Interpolator>();
+
+export function getInterpolator(progress: TimelineProgress): Interpolator {
+    return getOrInsertComputed(interpolatorMap, progress, createInterpolator);
+}
+
+const timelineInspectorMap = new WeakMap<TimelineProgress, TimelineInspector>();
+
+export function getTimelineInspector(progress: TimelineProgress): TimelineInspector {
+    return getOrInsertComputed(timelineInspectorMap, progress, createTimelineInspector);
 }

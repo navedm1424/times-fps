@@ -3,7 +3,7 @@ import {
     createFrameSampler,
     cubicBezierEasing,
     easeIn,
-    type Playhead,
+    type TimelineProgress,
     Segment,
     Sequence,
 } from "../src/index.js";
@@ -175,17 +175,17 @@ describe(`${Sequence.name}`, () => {
     });
 });
 
-describe("Timeline", () => {
+describe("TimelineInspector", () => {
     it(`${createTimelineInspector.name} returns function`, () => {
-        const playhead = { time: 0.5 };
-        const ti = createTimelineInspector(playhead);
+        const progress = { value: 0.5 };
+        const ti = createTimelineInspector(progress);
         expect(typeof ti).toBe("function");
-        expect(ti.playhead).toBe(playhead);
+        expect(ti.progress).toBe(progress);
     });
     it("ti(segment) hasStarted / hasFinished / isActive", () => {
         const segment = new Segment(0.2, 0.8);
         let time = 0.1;
-        const playhead: Playhead = { get time() { return time; } };
+        const playhead: TimelineProgress = { get value() { return time; } };
         const ti = createTimelineInspector(playhead);
         const stateBefore = ti(segment);
         expect(stateBefore.hasStarted()).toBe(false);
@@ -206,14 +206,14 @@ describe("Timeline", () => {
     });
     it("tl(sequence) works", () => {
         const seq = Sequence.fromRatios(["a", 1]).scaleToRange(0.25, 0.75);
-        const clock = { time: 0.5 };
-        const state = createTimelineInspector(clock)(seq);
+        const progress = { value: 0.5 };
+        const state = createTimelineInspector(progress)(seq);
         expect(state.hasStarted()).toBe(true);
         expect(state.isActive()).toBe(true);
         expect(state.hasFinished()).toBe(false);
     });
     it("throws when argument is not Segment or Sequence", () => {
-        const ti = createTimelineInspector({ time: 0 });
+        const ti = createTimelineInspector({ value: 0 });
         expect(() => ti(null as any)).toThrow();
         expect(() => ti(42 as any)).toThrow();
         expect(() => ti({} as any)).toThrow("segment or a sequence");
@@ -222,23 +222,23 @@ describe("Timeline", () => {
 
 describe("Interpolator", () => {
     it("createInterpolator returns interpolator", () => {
-        const playhead = {time: 0.5};
-        const map = createInterpolator(playhead);
-        expect(map.playhead).toBe(playhead);
+        const progress = {value: 0.5};
+        const map = createInterpolator(progress);
+        expect(map.progress).toBe(progress);
         expect(typeof map.segment).toBe("function");
         expect(typeof map(new Segment(0, 1))).toBe("object");
     });
     it("map(segment).to(start, end) remaps time", () => {
         const segment = new Segment(0.2, 0.8);
-        const playhead = { time: 0.5 };
-        const map = createInterpolator(playhead);
+        const progress = { value: 0.5 };
+        const map = createInterpolator(progress);
         const value = map(segment).to(100, 200);
         expect(value).toBeCloseTo(150);
     });
     it("map.segment(segment).withEasing(easing).to() applies easing", () => {
         const segment = new Segment(0, 1);
-        const playhead = { time: 0.5 };
-        const map = createInterpolator(playhead);
+        const progress = { value: 0.5 };
+        const map = createInterpolator(progress);
         const linear = map.segment(segment).to(0, 100);
         const eased = map.segment(segment).withEasing(easeIn).to(0, 100);
         expect(linear).toBe(50);
@@ -248,44 +248,44 @@ describe("Interpolator", () => {
     });
     it("map.easeIn(segment).to()", () => {
         const segment = new Segment(0, 1);
-        const map = createInterpolator({ time: 0.5 });
+        const map = createInterpolator({ value: 0.5 });
         const v = map.easeIn(segment).to(0, 10);
         expect(v).toBeGreaterThanOrEqual(0);
         expect(v).toBeLessThanOrEqual(10);
     });
     it("map.sequence(seq).to(anchors)", () => {
         const seq = Sequence.fromRatios(["a", 1], ["b", 1]).scaleToRange(0, 1);
-        const clock = { time: 0.5 };
-        const map = createInterpolator(clock);
+        const progress = { value: 0.5 };
+        const map = createInterpolator(progress);
         const v = map.sequence(seq).to(0, 50, 100);
         expect(v).toBeGreaterThanOrEqual(0);
         expect(v).toBeLessThanOrEqual(100);
     });
     it("map.sequence(seq).to() wrong anchor count throws", () => {
         const seq = Sequence.fromRatios(["a", 1], ["b", 1]).scaleToRange(0, 1);
-        const map = createInterpolator({ time: 0.5 });
+        const map = createInterpolator({ value: 0.5 });
         // @ts-expect-error
         expect(() => map.sequence(seq).to(0, 100)).toThrow("exactly 3");
     });
     it("throws on invalid sequence", () => {
-        const map = createInterpolator({ time: 0 });
+        const map = createInterpolator({ value: 0 });
         expect(() => map.sequence(null as any)).toThrow();
     });
 });
 
 describe("FrameSampler", () => {
-    const sampler = createFrameSampler((tl, _) => {
+    const sampler = createFrameSampler(progress => {
         return {
-            x: 100 * tl.playhead.time,
+            x: 100 * progress.value,
             y: 0
         };
     });
     it(`${sampler.sampleAt.name} returns Frame`, () => {
         const path0 = sampler.sampleAt(0);
-        expect(path0.time).toBe(0);
+        expect(path0.progress).toBe(0);
         expect(path0.value).toStrictEqual({ x: 0, y: 0 });
         const path1 = sampler.sampleAt(1);
-        expect(path1.time).toBe(1);
+        expect(path1.progress).toBe(1);
         expect(path1.value).toStrictEqual({ x: 100, y: 0 });
     });
     it(`${sampler.collect.name} returns Frames with duration and fps`, () => {

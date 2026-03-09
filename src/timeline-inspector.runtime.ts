@@ -1,27 +1,27 @@
-import type {Playhead} from "./frame-sampler.js";
+import type {TimelineProgress} from "./frame-sampler.js";
 import type {TimelineInspector} from "./timeline-inspector.types.js";
 import {Segment} from "./segment.js";
 import {Sequence} from "./sequence.js";
 import {assignReadonlyProperties} from "./utils/objects.runtime.js";
 
 /** @internal */
-export function createTimelineInspector(playhead: Playhead): TimelineInspector {
+export function createTimelineInspector(progress: TimelineProgress): TimelineInspector {
     const instance = function TimelineInspector(subject) {
         if (!(subject instanceof Segment || (subject) instanceof Sequence))
             throw new Error("The argument must either be a segment or a sequence.");
 
         return {
             hasStarted(): boolean {
-                return instance.playhead.time >= subject.start;
+                return instance.progress.value >= subject.start;
             },
             hasFinished(): boolean {
-                return instance.playhead.time >= subject.end;
+                return instance.progress.value >= subject.end;
             },
             isActive(): boolean {
-                return instance.playhead.time >= subject.start && instance.playhead.time < subject.end;
+                return instance.progress.value >= subject.start && instance.progress.value < subject.end;
             }
         };
     } as TimelineInspector;
-    assignReadonlyProperties(instance, { playhead });
+    assignReadonlyProperties(instance, { progress });
     return Object.freeze(instance);
 }

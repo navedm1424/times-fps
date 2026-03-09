@@ -59,15 +59,9 @@ type Subsequence<S extends string[], From extends number | S[number] = 0, To ext
     string[] extends S ? Sequence<S> : Sequence<ComputeSubarray<S, From, To>>;
 
 class SequenceConstructionLicense<S extends string[]> {
-    #brand = true;
-
     constructor(readonly segments: {
         [K in keyof S]: [name: S[K], segment: Segment];
     }) { }
-
-    static [Symbol.hasInstance](value: any): value is SequenceConstructionLicense<any> {
-        return typeof value === "object" && #brand in value && value.#brand;
-    }
 }
 
 export class Sequence<S extends string[]> {

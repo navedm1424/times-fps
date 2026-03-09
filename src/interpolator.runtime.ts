@@ -1,6 +1,6 @@
 import {invLerp, lerp, remap} from "./utils/numbers.js";
 import {easeIn, easeInOut, easeOut, type EasingFunction} from "./easing.js";
-import type {Playhead} from "./frame-sampler.js";
+import type {TimelineProgress} from "./frame-sampler.js";
 import type {Interpolator, SegmentMapper, SequenceMapper, ToAnchorsStep, ToRangeStep} from "./interpolator.types.ts";
 import {Sequence} from "./sequence.js";
 import {assignReadonlyProperties} from "./utils/objects.runtime.js";
@@ -96,7 +96,7 @@ class SequenceMapperImpl<S extends string[]> extends ToAnchorsStepImpl<S> implem
 
 const InterpolatorPrototype = {
     segment(segment): SegmentMapper {
-        return new SegmentMapperImpl(this.playhead.time, segment);
+        return new SegmentMapperImpl(this.progress.value, segment);
     },
     easeIn(segment) {
         return this.segment(segment)
@@ -114,7 +114,7 @@ const InterpolatorPrototype = {
         if (!((sequence) instanceof Sequence))
             throw new Error("Invalid sequence object! Please provide a valid sequence.");
 
-        return new SequenceMapperImpl(this.playhead.time, sequence);
+        return new SequenceMapperImpl(this.progress.value, sequence);
     }
 } as Interpolator;
 
@@ -123,11 +123,11 @@ Object.setPrototypeOf(InterpolatorPrototype, Function.prototype);
 Object.freeze(InterpolatorPrototype);
 
 /** @internal */
-export function createInterpolator(playhead: Playhead) {
+export function createInterpolator(progress: TimelineProgress) {
     const map = function Interpolator(segment) {
         return map.segment(segment);
     } as Interpolator;
-    assignReadonlyProperties(map, { playhead });
+    assignReadonlyProperties(map, { progress });
     Object.setPrototypeOf(map, InterpolatorPrototype);
     return Object.freeze(map);
 }

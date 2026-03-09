@@ -1,9 +1,9 @@
 import type {Sequence} from "./sequence.ts";
 import type {Segment} from "./segment.ts";
-import type {Playhead} from "./frame-sampler.js";
+import type {TimelineProgress} from "./frame-sampler.js";
 
 export interface TimelineInspector {
-    readonly playhead: Playhead;
+    readonly progress: TimelineProgress;
     (segment: Segment): {
         hasStarted(): boolean;
         hasFinished(): boolean;
