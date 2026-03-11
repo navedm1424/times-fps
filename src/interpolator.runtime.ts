@@ -50,25 +50,27 @@ class SegmentMapperImpl implements SegmentMapper {
 }
 
 class ToAnchorsStepImpl<S extends string[]> implements ToAnchorsStep<S> {
-    constructor(
-        readonly value: number,
-        readonly sequence: Sequence<S>
-    ) {}
+    readonly #value: number;
+    readonly #sequence: Sequence<S>;
+    constructor(value: number, sequence: Sequence<S>) {
+        this.#value = value;
+        this.#sequence = sequence;
+    }
 
     to(...anchors: Parameters<ToAnchorsStep<S>["to"]>): number {
-        if (anchors.length !== this.sequence.length + 1)
-            throw new Error(`The output anchors must be exactly ${this.sequence.length + 1} in number.`);
+        if (anchors.length !== this.#sequence.length + 1)
+            throw new Error(`The output anchors must be exactly ${this.#sequence.length + 1} in number.`);
 
-        if (this.value <= this.sequence.start)
+        if (this.#value <= this.#sequence.start)
             return anchors[0];
-        if (this.value >= this.sequence.end)
+        if (this.#value >= this.#sequence.end)
             return anchors[anchors.length - 1];
 
-        for (let i = 0; i < this.sequence.length; i++) {
-            const segment = this.sequence[i]!;
-            if (segment.start <= this.value && this.value < segment.end) {
+        for (let i = 0; i < this.#sequence.length; i++) {
+            const segment = this.#sequence[i]!;
+            if (segment.start <= this.#value && this.#value < segment.end) {
                 return remap(
-                    this.value,
+                    this.#value,
                     segment.start, segment.end,
                     anchors[i], anchors[i + 1]
                 );
@@ -80,16 +82,24 @@ class ToAnchorsStepImpl<S extends string[]> implements ToAnchorsStep<S> {
 }
 
 class SequenceMapperImpl<S extends string[]> extends ToAnchorsStepImpl<S> implements SequenceMapper<S> {
+    readonly #value: number;
+    readonly #sequence: Sequence<S>;
+    constructor(value: number, sequence: Sequence<S>) {
+        super(value, sequence);
+        this.#value = value;
+        this.#sequence = sequence;
+    }
+
     withEasing(easing: EasingFunction): ToAnchorsStep<S> {
         return new ToAnchorsStepImpl(
             lerp(
-                this.sequence.start, this.sequence.end,
+                this.#sequence.start, this.#sequence.end,
                 easing(invLerp(
-                    this.sequence.start, this.sequence.end,
-                    this.value
+                    this.#sequence.start, this.#sequence.end,
+                    this.#value
                 ))
             ),
-            this.sequence
+            this.#sequence
         );
     }
 }
@@ -118,7 +128,7 @@ const InterpolatorPrototype = {
     }
 } as Interpolator;
 
-Object.assign(InterpolatorPrototype, {[Symbol.toStringTag]: "Interpolator"});
+(InterpolatorPrototype as any)[Symbol.toStringTag] = "Interpolator";
 Object.setPrototypeOf(InterpolatorPrototype, Function.prototype);
 Object.freeze(InterpolatorPrototype);
 

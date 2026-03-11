@@ -4,7 +4,7 @@ import type {EasingFunction} from "./easing.js";
 import {saturate} from "./utils/numbers.js";
 import {createInterpolator} from "./interpolator.runtime.js";
 import {createTimelineInspector} from "./timeline-inspector.runtime.js";
-import {makePropertiesReadonly} from "./utils/objects.runtime.js";
+import {createWithReadonlyProperties} from "./utils/objects.runtime.js";
 
 export type TimelineProgress = {
     /** normalized time 0 → 1 */
@@ -81,30 +81,28 @@ const FrameSamplerPrototype = {
         return { duration, fps, frames };
     }
 } as FrameSampler<any>;
+(FrameSamplerPrototype as any)[Symbol.toStringTag] = "FrameSampler";
+Object.freeze(FrameSamplerPrototype);
 
 export function createFrameSampler<T extends FrameValue>(resolveFrame: FrameResolver<T>): FrameSampler<T> {
     let progressValue = 0;
-    const progress = Object.freeze({
-        get value() {
-            return progressValue;
+    const progress: TimelineProgress = Object.create(null, {
+        value: {
+            get: function get_value() {
+                return progressValue;
+            },
+            configurable: false
         }
     });
-    class FrameSamplerImpl implements FrameSampler<T> {
-        constructor(readonly progress: TimelineProgress) {
-            makePropertiesReadonly(this, "progress");
-        }
-
+    return createWithReadonlyProperties<FrameSampler<T>>(FrameSamplerPrototype, {
+        progress,
         sampleAt(t: number): Frame<T> {
             return {
                 progress: progressValue = saturate(t),
                 value: resolveFrame(progress)
             };
         }
-        iterate = FrameSamplerPrototype.iterate;
-        collect = FrameSamplerPrototype.collect;
-    }
-    Object.freeze(FrameSamplerImpl.prototype);
-    return new FrameSamplerImpl(progress);
+    });
 }
 
 function getOrInsertComputed<V>(map: WeakMap<TimelineProgress, V>, key: TimelineProgress, callback: (k: TimelineProgress) => V): V {

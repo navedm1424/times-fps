@@ -76,7 +76,7 @@ export class Sequence<S extends string[]> {
         if (!(license && license instanceof SequenceConstructionLicense))
             throw new Error("A sequence can only be created using the factory methods.");
 
-        const segments = {} as {
+        const segments = Object.create(null) as {
             [K in S[number]]: Segment;
         };
         for (let i = 0; i < license.segments.length; i++) {

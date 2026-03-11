@@ -60,12 +60,12 @@ Turn a normalized progress value into numbers and ranges that respect your timel
 ```ts
 import {createFrameSampler, getInterpolator, Timeline} from "times-fps";
 
-const timeline = Timeline.ofPhases(
+const tl = Timeline.ofPhases(
     ["intro", 1],
-    ["main",  2],
+    ["main", 2],
     ["outro", 1]
 );
-const p = timeline.phases;
+const p = tl.phases;
 
 const sampler = createFrameSampler(progress => {
     const map = getInterpolator(progress);
@@ -77,9 +77,9 @@ const sampler = createFrameSampler(progress => {
     const mainOpacity = map(p.main).to(0, 1);
 
     // Map the whole sequence to anchor values
-    const x = map.sequence(timeline.sequence).to(0, 100, 200, 300);
-    
-    const y = map.sequence(timeline.sequence.subsequence("main", "outro")).to(0, 100, 200);
+    const x = map.sequence(tl.sequence).to(0, 100, 200, 300);
+    // end-inclusive slicing
+    const y = map.sequence(tl.sequence.subsequence("main", "outro")).to(0, 100, 200);
 
     return {introRadius, mainOpacity, x, y};
 });
@@ -194,24 +194,24 @@ import {createFrameSampler, cubicBezierEasing, Timeline} from "times-fps";
 import {FrameExporter} from "times-fps/exporter";
 
 const timeline = Timeline.ofPhases(
-        ["intro", 1],
-        ["main", 2],
-        ["outro", 1]
+    ["intro", 1],
+    ["main", 2],
+    ["outro", 1]
 );
 
 const sampler = createFrameSampler(progress => {
-  return { x: progress.value * 100 };
+    return { x: progress.value * 100 };
 });
 
 await FrameExporter.exportToJson(
-        sampler.collect({
-          duration: 3,
-          fps: 120,
-          easing: cubicBezierEasing(0.55, 0.085, 0.68, 0.53)
-        }),
-        // this path should be relative to `process.cwd()`
-        "./json-exports",
-        "frames"
+    sampler.collect({
+        duration: 3,
+        fps: 120,
+        easing: cubicBezierEasing(0.55, 0.085, 0.68, 0.53)
+    }),
+    // this path should be relative to `process.cwd()`
+    "./json-exports",
+    "frames"
 );
 ```
 
@@ -225,7 +225,7 @@ You can use `FrameSampler` with Web Animations API:
 
 ```ts
 const sampler = createFrameSampler(progress => {
-  return {x: progress.value * 100};
+    return {x: progress.value * 100};
 });
 
 const duration = 3;
@@ -243,7 +243,7 @@ or `requestAnimationFrame`:
 
 ```ts
 const sampler = createFrameSampler(progress => {
-  return {x: progress.value * 100};
+    return {x: progress.value * 100};
 });
 
 const duration = 3;
@@ -261,34 +261,33 @@ const animate = () => {
     // use the value
     const value = next.value;
 
-    requestAnimationFrame(animate);  
+    requestAnimationFrame(animate);
 };
 requestAnimationFrame(animate);
 ```
 
-You could also write your own sampling logic:
+You could also do:
 
 ```ts
-const resolver = (progress: TimelineProgress) => {
-  return {x: progress.value * 100};
-};
+const resolver = createFrameSampler(progress => {
+    return {x: progress.value * 100};
+});
 
 const duration = 3;
 
-let progressValue;
-const progress = { get value() { return progressValue; }};
-
+let progress = 0;
 let startTime: number | undefined;
+
 const animate = (time) => {
-    if (!startTime)
+    if (typeof startTime === "undefined")
         startTime = time;
-    progressValue = (time - startTime) / duration;
-    if (progressValue > 1)
+    progress = (time - startTime) / duration;
+    if (progress > 1)
         return;
 
     // use the value
-    const value = resolver(progress);
-  
+    const value = sampler.sampleAt(progress);
+
     requestAnimationFrame(animate);
 };
 requestAnimationFrame(animate);
@@ -351,26 +350,26 @@ await FrameExporter.exportToJson(
 The primary entry points you will usually work with are:
 
 - **`Timeline`**: build normalized timelines with named phases.
-  - `Timeline.ofPhases(...[name, duration])` – create a timeline from labeled durations.
-  - `.phases` – a read‑only map of phase names to `Segment`s.
-  - `.sequence` – the underlying `Sequence` of segments (useful with the interpolator).
+    - `Timeline.ofPhases(...[name, duration])` – create a timeline from labeled durations.
+    - `.phases` – a read‑only map of phase names to `Segment`s.
+    - `.sequence` – the underlying `Sequence` of segments (useful with the interpolator).
 
 - **`createFrameSampler`**: create a sampler around a `progress => value` function.
-  - `.sampleAt(t)` – sample a single frame at normalized time \(t\).
-  - `.iterate(options)` – lazily generate frames.
-  - `.collect(options)` – eagerly collect frames along with `duration` and `fps`.
+    - `.sampleAt(t)` – sample a single frame at normalized time \(t\).
+    - `.iterate(options)` – lazily generate frames.
+    - `.collect(options)` – eagerly collect frames along with `duration` and `fps`.
 
 - **`getInterpolator`**: attach an `Interpolator` to a specific `AnimationProgress`.
-  - `map(segment).to(start, end)` – map progress in a segment to a numeric range.
-  - `map.segment(segment).withEasing(easing).to(start, end)` – map with easing.
-  - `map.sequence(sequence).to(...anchors)` – map a full sequence to anchor values.
+    - `map(segment).to(start, end)` – map progress in a segment to a numeric range.
+    - `map.segment(segment).withEasing(easing).to(start, end)` – map with easing.
+    - `map.sequence(sequence).to(...anchors)` – map a full sequence to anchor values.
 
 - **`getTimelineInspector`**: derive a `TimelineInspector` from an `AnimationProgress`.
-  - `inspect(segment).hasStarted() / hasFinished() / isActive()` – query phase/segment state.
+    - `inspect(segment).hasStarted() / hasFinished() / isActive()` – query phase/segment state.
 
 - **Easing helpers**:
-  - `cubicBezierEasing(mX1, mY1, mX2, mY2)` – create custom easing functions.
-  - `easeIn`, `easeOut`, `easeInOut` – standard easing presets.
+    - `cubicBezierEasing(mX1, mY1, mX2, mY2)` – create custom easing functions.
+    - `easeIn`, `easeOut`, `easeInOut` – standard easing presets.
 
 All of these are exported from the root `times-fps` entry point, except for `FrameExporter`, which is available from `times-fps/exporter`.
 
