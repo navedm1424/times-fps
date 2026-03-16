@@ -1,6 +1,6 @@
 ## times-fps
 
-`times-fps` is a tiny TypeScript toolkit for sampling animation frames with timelines, easing, and interpolation utilities.
+`times-fps` is a tiny TypeScript toolkit for designing animations and sampling animation frames with timelines, easing, and interpolation utilities.
 
 This library allows you to describe your animation with named phases. `times-fps` gives you:
 
@@ -350,7 +350,7 @@ await FrameExporter.exportToJson(
 The primary entry points you will usually work with are:
 
 - **`Timeline`**: build normalized timelines with named phases.
-    - `Timeline.ofPhases(...[name, duration])` – create a timeline from labeled durations.
+    - `Timeline.ofPhases(...[name, duration][])` – create a timeline from labeled durations.
     - `.phases` – a read‑only map of phase names to `Segment`s.
     - `.sequence` – the underlying `Sequence` of segments (useful with the interpolator).
 
@@ -381,7 +381,7 @@ I needed a way to precompute and export animation frames so the browser wouldn�
 
 What I ended up writing was not only a utility to precompute animations but also a way to design animations in terms of timelines and phases. You can design a complex interplay of CSS values in a single function, export the frames to JSON, and use them in your component.
 
-My goal is to keep this library small, focused, and composable. If you have ideas, suggestions, or corrections, the project is open‑source and I’d be very happy to hear from you.
+I'm aiming to keep this library small, focused, and composable. If you have ideas, suggestions, or corrections, the project is open‑source and I’d be very happy to hear from you.
 
 Thanks a lot!
 

@@ -1,7 +1,7 @@
 {
   "name": "times-fps",
   "version": "1.0.0-alpha",
-  "description": "A tiny frame-sampling toolkit with timeline, easing, and interpolation utilities.",
+  "description": "A tiny toolkit for designing animations and precomputing frames.",
   "keywords": [
     "animation",
     "timeline",
