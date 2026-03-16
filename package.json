@@ -1,6 +1,6 @@
 {
   "name": "times-fps",
-  "version": "1.0.0",
+  "version": "1.0.0-alpha",
   "description": "A tiny frame-sampling toolkit with timeline, easing, and interpolation utilities.",
   "keywords": [
     "animation",
@@ -25,7 +25,7 @@
   "files": ["dist"],
   "sideEffects": false,
   "scripts": {
-    "build": "rm -rf dist/ && tsc && rm -rf dist/**/*.types.js && rm -rf dist/**/*.runtime.d.ts"
+    "build": "rm -rf dist/ && tsc && find dist \\( -name \"*.types.js\" -o -name \"*.runtime.d.ts\" \\) -delete"
   },
   "repository": {
     "type": "git",

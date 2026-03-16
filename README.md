@@ -269,7 +269,7 @@ requestAnimationFrame(animate);
 You could also do:
 
 ```ts
-const resolver = createFrameSampler(progress => {
+const sampler = createFrameSampler(progress => {
     return {x: progress.value * 100};
 });
 
@@ -297,7 +297,7 @@ requestAnimationFrame(animate);
 
 ## Example: Driving an SVG Path Animation
 
-Here is a more complete, end‑to‑end example combining `times-fps` with another library I authored, `svg-path-kit`, to precompute SVG path frames:
+Here is a more complete, end‑to‑end example combining `times-fps` with another library I authored, [`svg-path-kit`](https://github.com/navedm1424/svg-path-kit), to precompute SVG path frames:
 
 ```ts
 import {PathBuilder, Point2D, Angle} from "svg-path-kit";
@@ -377,9 +377,11 @@ All of these are exported from the root `times-fps` entry point, except for `Fra
 
 ## Note from Author
 
-Designing animations often means thinking in terms of timelines and phases—“intro”, “main”, “outro”, loops, beats—but many APIs still expose only raw numbers: milliseconds, pixel deltas, easing parameters. I wrote `times-fps` to bridge that gap: to let me talk about time in the same structured way I sketch animations, while still giving me precise control over individual segments, easing, and sampling.
+I needed a way to precompute and export animation frames so the browser wouldn’t have to run Javascript to compute each frame. I could then feed the precomputed, exported frames into WAAPI to get a JS-computed animation with browser-native performance. 
 
-My goal is to keep this library small, focused, and composable with geometry and rendering toolkits, so you can use it in GUI apps, data visualizations, or SVG art without pulling in heavy dependencies. If you have ideas, suggestions, or corrections, the project is open‑source and I’d be very happy to hear from you.
+What I ended up writing was not only a utility to precompute animations but also a way to design animations in terms of timelines and phases. You can design a complex interplay of CSS values in a single function, export the frames to JSON, and use them in your component.
+
+My goal is to keep this library small, focused, and composable. If you have ideas, suggestions, or corrections, the project is open‑source and I’d be very happy to hear from you.
 
 Thanks a lot!
 
