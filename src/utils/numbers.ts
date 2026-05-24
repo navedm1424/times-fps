@@ -21,11 +21,14 @@ export function remap(
     newStart: number,
     newEnd: number
 ) {
+    const delta = currentEnd - currentStart;
+    if (delta === 0)
+        return NaN;
     if (currentStart === newStart && currentEnd === newEnd)
         return value;
-    if (value <= currentStart)
+    if ((delta > 0 && value <= currentStart) || (delta < 0 && value >= currentStart))
         return newStart;
-    if (value >= currentEnd)
+    if ((delta > 0 && value >= currentEnd) || (delta < 0 && value <= currentEnd))
         return newEnd;
 
     // same as lerp(newStart, newEnd, invLerp(currentStart, currentEnd, value))
