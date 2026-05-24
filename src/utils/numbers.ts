@@ -11,7 +11,10 @@ export function invLerp(
     end: number,
     v: number
 ) {
-    return saturate((v - start) / (end - start));
+    const denominator = end - start;
+    if (denominator === 0)
+        return NaN;
+    return saturate((v - start) / denominator);
 }
 
 export function remap(
@@ -21,19 +24,19 @@ export function remap(
     newStart: number,
     newEnd: number
 ) {
-    const delta = currentEnd - currentStart;
-    if (delta === 0)
+    const currentRange = currentEnd - currentStart;
+    if (currentRange === 0)
         return NaN;
     if (currentStart === newStart && currentEnd === newEnd)
         return value;
-    if ((delta > 0 && value <= currentStart) || (delta < 0 && value >= currentStart))
+    if ((currentRange > 0 && value <= currentStart) || (currentRange < 0 && value >= currentStart))
         return newStart;
-    if ((delta > 0 && value >= currentEnd) || (delta < 0 && value <= currentEnd))
+    if ((currentRange > 0 && value >= currentEnd) || (currentRange < 0 && value <= currentEnd))
         return newEnd;
 
     // same as lerp(newStart, newEnd, invLerp(currentStart, currentEnd, value))
     return (
-        newStart + (newEnd - newStart) * ((value - currentStart) / (currentEnd - currentStart))
+        newStart + (newEnd - newStart) * ((value - currentStart) / currentRange)
     );
 }
 
