@@ -25,7 +25,9 @@
   "files": ["dist"],
   "sideEffects": false,
   "scripts": {
-    "build": "rm -rf dist/ && tsc && find dist \\( -name \"*.types.js\" -o -name \"*.runtime.d.ts\" \\) -delete"
+    "prebuild": "rm -rf dist/",
+    "build": "tsc",
+    "postbuild": "find dist \\( -name \"*.types.js\" -o -name \"*.runtime.d.ts\" \\) -delete"
   },
   "repository": {
     "type": "git",

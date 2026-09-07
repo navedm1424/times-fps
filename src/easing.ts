@@ -1,6 +1,9 @@
 import {saturate} from "./utils/numbers.js";
 
 export type EasingFunction = (t: number) => number;
+export type CubicBezierEasingFunction = EasingFunction & {
+    bezierDefinition: readonly [number, number, number, number];
+};
 
 const calcBezier = (t: number, a1: number, a2: number) =>
     (((1.0 - 3.0 * a2 + 3.0 * a1) * t + (3.0 * a2 - 6.0 * a1)) * t + 3.0 * a1) * t;
@@ -23,16 +26,25 @@ function binarySubdivide(x: number, lowerBound: number, upperBound: number, mX1:
     return currentT;
 }
 
-export function cubicBezierEasing(mX1: number, mY1: number, mX2: number, mY2: number): EasingFunction {
+function linearEasing(t: number) {
+    return t;
+}
+linearEasing.cssValue = "cubic-bezier(0, 0, 1, 1)";
+linearEasing.bezierDefinition = [0, 0, 1, 1] as const;
+
+export function cubicBezierEasing(mX1: number, mY1: number, mX2: number, mY2: number): CubicBezierEasingFunction {
     mX1 = saturate(mX1);
     mX2 = saturate(mX2);
     // If this is a linear gradient, return linear easing
     if (mX1 === mY1 && mX2 === mY2)
-        return t => t;
+        return linearEasing;
     const getTForX = (aX: number) => binarySubdivide(aX, 0, 1, mX1, mX2);
     // If animation is at start/end, return t without easing
-    const easing: EasingFunction = t => t === 0 || t === 1 ? t : calcBezier(getTForX(t), mY1, mY2);
-    Object.defineProperty(easing, "name", { value: `cubic-bezier(${mX1}, ${mY1}, ${mX2}, ${mY2})` });
+    function easing(t: number) {
+        return t === 0 || t === 1 ? t : calcBezier(getTForX(t), mY1, mY2);
+    }
+    easing.cssValue = `cubic-bezier(${mX1}, ${mY1}, ${mX2}, ${mY2})`;
+    easing.bezierDefinition = [mX1, mY1, mX2, mY2] as const;
     return easing;
 }
 
