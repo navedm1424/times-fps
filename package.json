@@ -27,7 +27,8 @@
   "scripts": {
     "prebuild": "rm -rf dist/",
     "build": "tsc",
-    "postbuild": "find dist \\( -name \"*.types.js\" -o -name \"*.runtime.d.ts\" \\) -delete"
+    "postbuild": "find dist \\( -name \"*.types.js\" -o -name \"*.runtime.d.ts\" \\) -delete",
+    "prepack": "rm -f ${npm_package_name}-${npm_package_version}.tgz"
   },
   "repository": {
     "type": "git",
