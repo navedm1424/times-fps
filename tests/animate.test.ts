@@ -15,7 +15,7 @@ describe("easing", () => {
         it("returns function", () => {
             const e = cubicBezierEasing(0.42, 0, 1, 1);
             expect(typeof e).toBe("function");
-            expect(e.name).toBe("cubic-bezier(0.42, 0, 1, 1)");
+            expect(e.bezierDefinition).toStrictEqual([0.42, 0, 1, 1]);
         });
         it("at t=0 returns 0, at t=1 returns 1", () => {
             const e = cubicBezierEasing(0.42, 0, 0.58, 1);

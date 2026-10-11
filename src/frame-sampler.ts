@@ -55,6 +55,7 @@ function* stepper({ duration = 1, fps = 60, easing }: FrameSamplingOptions = {})
     if (!Number.isFinite(fps) || fps <= 0)
         throw new Error("fps must be > 0 and finite.");
 
+    // Duration times FPS. Yes, this is where the name came from.
     const frameCount = Math.floor(duration * fps);
     if (frameCount < 1)
         return;

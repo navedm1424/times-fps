@@ -58,11 +58,7 @@ type LengthMinusOne<L extends any[]> = string[] extends L ? number : L extends [
 type Subsequence<S extends string[], From extends number | S[number] = 0, To extends number | S[number] = LengthMinusOne<S>> =
     string[] extends S ? Sequence<S> : Sequence<ComputeSubarray<S, From, To>>;
 
-class SequenceConstructionLicense<S extends string[]> {
-    constructor(readonly segments: {
-        [K in keyof S]: [name: S[K], segment: Segment];
-    }) { }
-}
+const SEQUENCE_CONSTRUCTION_LICENSE = Symbol("SequenceConstructionLicense")
 
 export class Sequence<S extends string[]> {
     #brand = true;
@@ -72,20 +68,23 @@ export class Sequence<S extends string[]> {
         readonly [K in S[number]]: Segment;
     };
 
-    private constructor(license?: any) {
-        if (!(license && license instanceof SequenceConstructionLicense))
+    private constructor(
+        unstructuredSegments: { [K in keyof S]: [name: S[K], segment: Segment]; },
+        license?: typeof SEQUENCE_CONSTRUCTION_LICENSE
+    ) {
+        if (license !== SEQUENCE_CONSTRUCTION_LICENSE)
             throw new Error("A sequence can only be created using the factory methods.");
 
         const segments = Object.create(null) as {
             [K in S[number]]: Segment;
         };
-        for (let i = 0; i < license.segments.length; i++) {
-            const segment: [S[number], Segment] = license.segments[i]!;
+        for (let i = 0; i < unstructuredSegments.length; i++) {
+            const segment: [S[number], Segment] = unstructuredSegments[i]!;
             segments[segment[0]] = segment[1];
             (this as any)[i] = segment[1];
         }
 
-        this.length = license.segments.length;
+        this.length = unstructuredSegments.length;
         this.segments = Object.freeze(segments);
         Object.freeze(this);
     }
@@ -121,7 +120,7 @@ export class Sequence<S extends string[]> {
                             .to(remap(currentTime += duration, 0, totalTime, start, end))
                     ];
                 }
-                return new Sequence(new SequenceConstructionLicense(segments));
+                return new Sequence(segments, SEQUENCE_CONSTRUCTION_LICENSE);
             }
         };
     }
@@ -150,22 +149,22 @@ export class Sequence<S extends string[]> {
         let startPushing = false;
         if (typeof from === "number" && typeof to === "number") {
             if (to < from)
-                return new Sequence<any>(new SequenceConstructionLicense(output));
+                return new Sequence<any>(output, SEQUENCE_CONSTRUCTION_LICENSE);
             if (Object.is(from, to) && from >= 0 && from < segmentNames.length) {
                 const segmentName = segmentNames[from]!;
                 output.push([segmentName, this.segments[segmentName]!]);
-                return new Sequence<any>(new SequenceConstructionLicense(output));
+                return new Sequence<any>(output, SEQUENCE_CONSTRUCTION_LICENSE);
             }
         }
         if (typeof from === "number") {
             if (from > segmentNames.length - 1)
-                return new Sequence<any>(new SequenceConstructionLicense(output));
+                return new Sequence<any>(output, SEQUENCE_CONSTRUCTION_LICENSE);
             if (from < 0)
                 from = 0 as From;
         }
         if (typeof to === "number") {
             if (to < 0)
-                return new Sequence<any>(new SequenceConstructionLicense(output));
+                return new Sequence<any>(output, SEQUENCE_CONSTRUCTION_LICENSE);
             if (to > segmentNames.length - 1)
                 to = segmentNames.length - 1 as To;
         }
@@ -182,7 +181,7 @@ export class Sequence<S extends string[]> {
             }
         }
 
-        return new Sequence<any>(new SequenceConstructionLicense(output));
+        return new Sequence<any>(output, SEQUENCE_CONSTRUCTION_LICENSE);
     }
     toArray(): Segment[] {
         const result: Segment[] = [];
