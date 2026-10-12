@@ -179,8 +179,8 @@ export declare class SequenceBuilder<SE extends SequenceEntries = {}> {
     add<N extends string, NS extends Sequence>(
         name: N,
         sequence: NS,
-        at?: NestedSequenceEntry<NS, keyof NS & string>["at"]
-    ): SequenceBuilder<SE & { [_ in N]: NestedSequenceEntry<NS, keyof NS & string>; }>;
+        at?: NestedSequenceEntry<NS, keyof SE & string>["at"]
+    ): SequenceBuilder<SE & { [_ in N]: NestedSequenceEntry<NS, keyof SE & string>; }>;
 
     build(repeat?: Repeat): Sequence<{ [K in keyof SE]: SE[K] }>;
 }
