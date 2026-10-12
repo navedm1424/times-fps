@@ -1,6 +1,6 @@
 // ── Time ───────────────────────────────────────────────────
 
-type Milliseconds = number;
+type Seconds = number;
 type Ratio = number;     // share of the animation's duration, 0–1
 export type Progress = number;  // position on the 0→1 change axis
 
@@ -9,9 +9,9 @@ export type Progress = number;  // position on the 0→1 change axis
 type CubicBezierDefinition = readonly [x1: number, y1: number, x2: number, y2: number];
 type Easing = 'linear' | 'ease' | 'ease-in' | 'ease-out' | 'ease-in-out' | CubicBezierDefinition;
 
-interface TweenTransition {
-    type: 'tween';
-    duration: Milliseconds;
+interface EasedTransition {
+    type: 'eased';
+    duration: Seconds;
     easing?: Easing;
 }
 
@@ -27,22 +27,22 @@ interface PhysicalSpringTransition {
 
 interface PerceptualSpringTransition {
     type: 'spring';
-    duration: Milliseconds;
+    duration: Seconds;
     bounce: number;            // 0 = no overshoot
     velocity?: number;         // progress per second
 }
 
 type SpringTransition = PhysicalSpringTransition | PerceptualSpringTransition;
-type Transition = TweenTransition | SpringTransition;
+type Transition = EasedTransition | SpringTransition;
 
-export declare function tween(duration: Milliseconds, easing?: Easing): TweenTransition;
+export declare function eased(duration: Seconds, easing?: Easing): EasedTransition;
 
 export declare function spring(options: Omit<PhysicalSpringTransition, 'type'>): PhysicalSpringTransition;
 export declare function spring(options: Omit<PerceptualSpringTransition, 'type'>): PerceptualSpringTransition;
 
 /** Duration comes from the animation's ratio, so only transitions shaped by a given duration fit. */
-type TransitionWithoutDuration =
-    | Omit<TweenTransition, 'duration'>
+type StretchableTransition =
+    | Omit<EasedTransition, 'duration'>
     | Omit<PerceptualSpringTransition, 'duration'>;
 
 // ── How often ──────────────────────────────────────────────
@@ -51,23 +51,23 @@ type RepeatMode = 'loop' | 'reverse' | 'mirror';
 
 interface Repeat {
     count: number;             // repetitions after the first play
-    delay?: Milliseconds;
+    delay?: Seconds;
     mode?: RepeatMode;
 }
 
 // ── Tweens ─────────────────────────────────────────────────
 
-interface DurationTween<Name extends string = string> {
+interface TimedTween<Name extends string = string> {
     name: Name;
     transition: Transition;
-    delay?: Milliseconds;
+    delay?: Seconds;
     repeat?: Repeat;           // count must be finite
 }
 
 interface RatioTween<Name extends string = string> {
     name: Name;
     ratio?: Ratio;             // omitted = equal share of what's left
-    transition?: TransitionWithoutDuration;
+    transition?: StretchableTransition;
 }
 
 // ── Animations ─────────────────────────────────────────────
@@ -75,8 +75,8 @@ interface RatioTween<Name extends string = string> {
 export declare class Animation {
     readonly repeat?: Repeat;
     static of(transition: Transition, repeat?: Repeat): SimpleAnimation;
-    static of<T extends string[]>(transition: Transition, tweens: { [N in keyof T]: RatioTween<T[N]>; }, repeat?: Repeat): RatioTweenAnimation<T>;
-    static of<T extends string[]>(tweens: { [N in keyof T]: DurationTween<T[N]>; }, repeat?: Repeat): DurationTweenAnimation<T>;
+    static of<T extends string[]>(transition: Transition, tweens: { [I in keyof T]: RatioTween<T[I]>; }, repeat?: Repeat): SelfTimedAnimation<T>;
+    static of<T extends string[]>(tweens: { [I in keyof T]: TimedTween<T[I]>; }, repeat?: Repeat): TweenTimedAnimation<T>;
 }
 
 export interface SimpleAnimation extends Animation {
@@ -84,40 +84,45 @@ export interface SimpleAnimation extends Animation {
     readonly transition: Transition;
 }
 
-export interface RatioTweenAnimation<T extends string[]> extends Animation {
-    readonly type: "ratio-tween";
+export interface SelfTimedAnimation<T extends string[]> extends Animation {
+    readonly type: "self-timed";
     readonly transition: Transition;
-    tweens: {
-        [N in keyof T]: RatioTween<T[N]>;
+    readonly tweens: {
+        [I in keyof T]: RatioTween<T[I]>;
     };
 }
 
-export interface DurationTweenAnimation<T extends string[]> extends Animation {
-    readonly type: "duration-tween";
+export interface TweenTimedAnimation<T extends string[]> extends Animation {
+    readonly type: "tween-timed";
     readonly tweens: {
-        [N in keyof T]: DurationTween<T[N]>;
+        [I in keyof T]: TimedTween<T[I]>;
     };
     // easing?: Easing;           // compounds with each tween's easing
 }
 
-export type MultiTweenAnimation<T extends string[]> = RatioTweenAnimation<T> | DurationTweenAnimation<T>;
+export type MultiTweenAnimation<T extends string[]> = SelfTimedAnimation<T> | TweenTimedAnimation<T>;
 
 // ── Sequences ──────────────────────────────────────────────
 
-type PositionSymbol = '+' | '-' | '>+' | '>-';
+type AtOperator = '+' | '-' | '>+' | '>-';
 
 /**
  * A number is absolute time.
- * `+n` / `-n` is relative to the previous entry's last referencable point: for an infinite repeat, the end of its first iteration.
+ * `+n` / `-n` is relative to the previous entry's last referenceable point: for an infinite repeat, the end of its first iteration.
  * `>+n` / `>-n` is relative to the previous entry's start.
  */
-type Position<S extends string> = Milliseconds | `${PositionSymbol}${number}` | `${S}${PositionSymbol}${number}`;
+type At<N extends string> = Seconds | `${AtOperator}${number}` | `${N}${AtOperator}${number}`;
 
-interface Stagger {
-    each: Milliseconds;
+// interface Stagger {
+//     each: Seconds;
+//     from?:
+//     easing?: Easing;
+// }
+type Stagger = (index: number, total: number) => Seconds;
+declare function stagger(each: Seconds, options?: {
     from?: 'first' | 'last' | 'center' | number;
     easing?: Easing;
-}
+}): Stagger;
 
 // interface AnimationEntry {
 //     animation: Animation;
@@ -130,52 +135,52 @@ interface Stagger {
 //     at?: Position;
 // }
 
-export declare class Sequence<S extends SequenceEntries = {}> {
+export declare class Sequence<SE extends SequenceEntries = {}> {
     // entries: readonly (AnimationEntry | SequenceEntry)[];
-    readonly entries: S;
+    readonly entries: SE;
     readonly repeat?: Repeat;
     static builder(): SequenceBuilder;
 }
 
-export interface SimpleAnimationEntry<S extends string = string> {
+export interface SimpleAnimationEntry<N extends string = string> {
     animation: SimpleAnimation;
-    at?: Position<S>;
+    at?: At<N>;
     stagger?: Stagger;
 }
-export interface MultiTweenAnimationEntry<A extends MultiTweenAnimation<string[]> = MultiTweenAnimation<string[]>, S extends string = string> {
+export interface MultiTweenAnimationEntry<A extends MultiTweenAnimation<string[]> = MultiTweenAnimation<string[]>, N extends string = string> {
     animation: A;
-    at?: Position<S>;
+    at?: At<N>;
     stagger?: Stagger;
 }
-export interface SequenceEntry<NS extends Sequence = Sequence, S extends string = string> {
+export interface NestedSequenceEntry<NS extends Sequence = Sequence, N extends string = string> {
     sequence: NS;
-    at?: Position<S>;
+    at?: At<N>;
 }
 
 type SequenceEntries = {
-    [name: string]: SimpleAnimationEntry | MultiTweenAnimationEntry | SequenceEntry;
+    [name: string]: SimpleAnimationEntry | MultiTweenAnimationEntry | NestedSequenceEntry;
 };
 
-export declare class SequenceBuilder<S extends SequenceEntries = {}> {
-    entry<N extends string>(
+export declare class SequenceBuilder<SE extends SequenceEntries = {}> {
+    add<N extends string>(
         name: N,
         animation: SimpleAnimation,
-        at?: SimpleAnimationEntry<keyof S & string>["at"],
+        at?: SimpleAnimationEntry<keyof SE & string>["at"],
         stagger?: Stagger
-    ): SequenceBuilder<S & { [_ in N]: SimpleAnimationEntry<keyof S & string> }>;
+    ): SequenceBuilder<SE & { [_ in N]: SimpleAnimationEntry<keyof SE & string> }>;
 
-    entry<N extends string, A extends MultiTweenAnimation<string[]>>(
+    add<N extends string, A extends MultiTweenAnimation<string[]>>(
         name: N,
         animation: A,
-        at?: MultiTweenAnimationEntry<A, keyof S & string>["at"],
+        at?: MultiTweenAnimationEntry<A, keyof SE & string>["at"],
         stagger?: Stagger
-    ): SequenceBuilder<S & { [_ in N]: MultiTweenAnimationEntry<A, keyof S & string> }>;
+    ): SequenceBuilder<SE & { [_ in N]: MultiTweenAnimationEntry<A, keyof SE & string> }>;
 
-    entry<N extends string, SE extends Sequence>(
+    add<N extends string, NS extends Sequence>(
         name: N,
-        sequence: SE,
-        at?: SequenceEntry<SE, keyof S & string>["at"]
-    ): SequenceBuilder<S & { [_ in N]: SequenceEntry<SE, keyof S & string>; }>;
+        sequence: NS,
+        at?: NestedSequenceEntry<NS, keyof NS & string>["at"]
+    ): SequenceBuilder<SE & { [_ in N]: NestedSequenceEntry<NS, keyof NS & string>; }>;
 
-    build(repeat?: Repeat): Sequence<{ [K in keyof S]: S[K] }>;
+    build(repeat?: Repeat): Sequence<{ [K in keyof SE]: SE[K] }>;
 }

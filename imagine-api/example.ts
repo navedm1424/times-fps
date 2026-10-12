@@ -1,52 +1,52 @@
-import type {Adaptor} from "./adaptation.js";
+import type {Adapter} from "./adaptation.js";
 import {
     Sequence,
-    tween,
+    eased,
     spring,
     Animation
-} from "./sequence.js";
+} from "./definition.js";
 
 type WAAPIEffect = [keyframes: Keyframe[], options: KeyframeAnimationOptions];
-declare const waapi: Adaptor<WAAPIEffect[]>;
+declare const waapi: Adapter<WAAPIEffect[]>;
 declare const backdrop: Element, card: Element, badge: Element, cta: Element, arrow: Element;
 
-const fadeIn = Animation.of(tween(200, 'ease-out'));
+const fadeIn = Animation.of(eased(0.2, 'ease-out'));
 
 const rise = Animation.of(spring({ stiffness: 260, damping: 22 }));
 
 // Each tween owns its time
 const heartbeat = Animation.of(
     [
-        { name: 'grow', transition: spring({ duration: 300, bounce: 0.4 }) },
-        { name: 'settle', transition: tween(250, 'ease-in-out'), delay: 80 },
+        { name: 'grow', transition: spring({ duration: 0.3, bounce: 0.4 }) },
+        { name: 'settle', transition: eased(0.25, 'ease-in-out'), delay: 0.08 },
     ],
-    { count: Infinity, delay: 900 }
+    { count: Infinity, delay: 0.9 }
 );
 
 // The animation owns the time and the tweens share it
 const nudge = Animation.of(
-    tween(480, 'ease-out'),
+    eased(0.48, 'ease-out'),
     [
         { name: 'away', ratio: 0.2 },
-        { name: 'back', ratio: 0.3, transition: { type: 'tween', easing: 'ease-in-out' } },
+        { name: 'back', ratio: 0.3, transition: { type: 'eased', easing: 'ease-in-out' } },
         { name: 'home', transition: { type: 'spring', bounce: 0.5 } },  // the remaining 0.5
     ]
 );
 
 const reveal = Sequence.builder()
-.entry('backdrop', fadeIn)
-.entry('card', rise, '>+80')
+.add('backdrop', fadeIn)
+.add('card', rise, '>+0.08')
 .build();
 
 const intro = Sequence.builder()
-.entry('reveal', reveal)
-.entry('badge', heartbeat, '+300')
-.entry('cta', fadeIn, '+0')  // after the first beat
-.entry('hint', nudge, '>+0')
+.add('reveal', reveal)
+.add('badge', heartbeat, '+0.3')
+.add('cta', fadeIn, '+0')  // after the first beat
+.add('hint', nudge, '>+0')
 .build();
 
 // Adaptation phase
-const plan = waapi.adapt(intro, {
+const effects = waapi.adapt(intro, {
     reveal: {
         backdrop: {
             target: backdrop,
@@ -67,7 +67,7 @@ const plan = waapi.adapt(intro, {
     badge: {
         target: badge,
         from: { scale: 1 },
-        tweens: { grow: { scale: 1.15 }, settle: { scale: 1 } },
+        to: { grow: { scale: 1.15 }, settle: { scale: 1 } },
     },
     cta: {
         target: cta,
@@ -78,7 +78,7 @@ const plan = waapi.adapt(intro, {
     hint: {
         target: arrow,
         from: { translate: '0 0' },
-        tweens: {
+        to: {
             away: { translate: '-6px 0' },
             back: { translate: '8px 0' },
             // back: { translate: { values: ['4px 0', '8px 0'], offsets: [0.5, 1] } },

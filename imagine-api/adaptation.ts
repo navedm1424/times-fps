@@ -4,8 +4,8 @@ import type {
     Animation, MultiTweenAnimation,
     MultiTweenAnimationEntry,
     Sequence,
-    SequenceEntry, SimpleAnimation
-} from "./sequence.js";
+    NestedSequenceEntry, SimpleAnimation
+} from "./definition.js";
 
 type Target = unknown;
 type Value = unknown;
@@ -18,21 +18,21 @@ type Value = unknown;
 //     [property: string]: readonly Value[] | PropertyKeyframes;
 // };
 
-type Keyframe = {
+type PropertyValues = {
     [property: string]: Value;
 };
 
 interface SingleTweenMapping {
     target: Target;
-    from: Keyframe;
-    to: Keyframe;
+    from: PropertyValues;
+    to: PropertyValues;
     // keyframes: Keyframes;
 }
 
 interface MultiTweenMapping<TweenName extends string> {
     target: Target;
-    from: Keyframe;
-    tweens: { [N in TweenName]: Keyframe };  // values continue from the previous tween's end
+    from: PropertyValues;
+    to: { [N in TweenName]: PropertyValues };  // values continue from the previous tween's end
 }
 
 type AnimationMappingOf<A extends Animation> =
@@ -41,7 +41,7 @@ type AnimationMappingOf<A extends Animation> =
         : SingleTweenMapping;
 
 type SequenceMappingOf<S extends Sequence> = {
-    [Name in keyof S["entries"]]: S["entries"][Name] extends SequenceEntry<infer Nested>
+    [Name in keyof S["entries"]]: S["entries"][Name] extends NestedSequenceEntry<infer Nested>
         ? SequenceMappingOf<Nested>
         : S["entries"][Name] extends MultiTweenAnimationEntry<infer A>
             ? AnimationMappingOf<A>
@@ -54,7 +54,7 @@ type MappingOf<Definition extends Sequence | Animation> =
         ? SequenceMappingOf<Definition>
         : AnimationMappingOf<Definition>;
 
-export interface Adaptor<Output> {
+export interface Adapter<Output> {
     adapt<const Definition extends Sequence | Animation>(
         definition: Definition,
         mapping: MappingOf<Definition>,
