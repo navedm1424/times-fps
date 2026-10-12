@@ -1,5 +1,5 @@
 import type {StretchableTransition, Transition} from "./transition.js";
-import {Ratio, Repeat, Seconds} from "./types";
+import type {Ratio, Repeat, Seconds} from "./types.js";
 
 export interface TimedTween<Name extends string = string> {
     name: Name;

@@ -1,6 +1,5 @@
-
 import type {Easing} from "./easing.js";
-import {Progress, Seconds} from "./types";
+import type {Progress, Seconds} from "./types.js";
 
 export type Transition = EasedTransition | SpringTransition;
 
