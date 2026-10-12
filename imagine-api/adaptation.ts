@@ -1,0 +1,62 @@
+// ── Adaptation ─────────────────────────────────────────────
+
+import type {
+    Animation, MultiTweenAnimation,
+    MultiTweenAnimationEntry,
+    Sequence,
+    SequenceEntry, SimpleAnimation
+} from "./sequence.js";
+
+type Target = unknown;
+type Value = unknown;
+
+// interface PropertyKeyframes {
+//     values: readonly Value[];
+//     offsets?: readonly Progress[];
+// }
+// type Keyframes = {
+//     [property: string]: readonly Value[] | PropertyKeyframes;
+// };
+
+type Keyframe = {
+    [property: string]: Value;
+};
+
+interface SingleTweenMapping {
+    target: Target;
+    from: Keyframe;
+    to: Keyframe;
+    // keyframes: Keyframes;
+}
+
+interface MultiTweenMapping<TweenName extends string> {
+    target: Target;
+    from: Keyframe;
+    tweens: { [N in TweenName]: Keyframe };  // values continue from the previous tween's end
+}
+
+type AnimationMappingOf<A extends Animation> =
+    A extends MultiTweenAnimation<infer TweenNames>
+        ? MultiTweenMapping<TweenNames[number]>
+        : SingleTweenMapping;
+
+type SequenceMappingOf<S extends Sequence> = {
+    [Name in keyof S["entries"]]: S["entries"][Name] extends SequenceEntry<infer Nested>
+        ? SequenceMappingOf<Nested>
+        : S["entries"][Name] extends MultiTweenAnimationEntry<infer A>
+            ? AnimationMappingOf<A>
+            : AnimationMappingOf<SimpleAnimation>;
+};
+
+/** Sequence is checked first, since every sequence is structurally an animation too. */
+type MappingOf<Definition extends Sequence | Animation> =
+    Definition extends Sequence
+        ? SequenceMappingOf<Definition>
+        : AnimationMappingOf<Definition>;
+
+export interface Adaptor<Output> {
+    adapt<const Definition extends Sequence | Animation>(
+        definition: Definition,
+        mapping: MappingOf<Definition>,
+    ): Output;
+}
