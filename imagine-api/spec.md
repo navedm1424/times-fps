@@ -21,8 +21,8 @@ A definition answers four questions about each change:
 |---|---|
 | How long does it take? | A transition's duration, or a share (ratio) of an animation's duration |
 | How does it progress? | A transition's easing or spring |
-| When does it happen relative to everything else? | A sequence entry's position (`at`) |
-| How often does it happen? | `Repeat` |
+| When does it happen relative to everything else? | A sequence entry's position (`at`), and an animation's or sequence's `delay` |
+| How often does it happen? | Repeat options |
 
 ### Units
 
@@ -95,30 +95,32 @@ type StretchableTransition =
 
 Some tweens get their duration from outside (see §5.2). They can only take transitions whose shape can be stretched over a given duration: an eased transition's easing, or a perceptual spring's bounce. A physical spring can't appear there, because it works out its own duration, which would conflict with the one it's given.
 
-## 4. Repeat: how often
+## 4. Repeat options: how often
 
 ```ts
-interface Repeat {
-    count: number;         // repetitions after the first play
-    delay?: Seconds;
-    mode?: 'loop' | 'reverse' | 'mirror';
+interface RepeatOptions {
+    repeatCount?: number;      // repetitions after the first play
+    repeatDelay?: Seconds;
+    repeatMode?: 'loop' | 'reverse' | 'mirror';
 }
 ```
 
-- **`count`** is the number of repetitions *after* the first play. `count: 2` plays three times in total. `Infinity` is a valid count where infinite repetition is allowed. Where it isn't, it's rejected at runtime, not by the types.
-- **`delay`** is the pause *between* plays. It never follows the last play.
-- **`mode`**:
+Repeat options are flattened into whatever repeats: a timed tween's own fields, or an animation's or sequence's options.
+
+- **`repeatCount`** is the number of repetitions *after* the first play. `repeatCount: 2` plays three times in total, and an omitted count plays once. `Infinity` is a valid count where infinite repetition is allowed. Where it isn't, it's rejected at runtime, not by the types.
+- **`repeatDelay`** is the pause *between* plays. It never follows the last play.
+- **`repeatMode`**:
   - `loop`: every play runs forwards.
   - `reverse`: every other play runs backwards in time, so its easing is reversed too.
   - `mirror`: every other play swaps the start and end and keeps the easing running forwards. This is usually what you want for springs, because a spring played backwards in time starts wobbly and ends calm.
 
-Where `Repeat` can appear, and whether it can be infinite:
+Where repeat options can appear, and whether they can repeat infinitely:
 
 | On | Infinite allowed |
 |---|---|
 | Timed tween | No |
 | Animation (any kind) | Yes |
-| Sequence | Yes, unless the sequence contains an infinitely repeating animation. That's rejected at runtime. |
+| Sequence | Yes, unless the sequence contains an infinitely repeating entry, at any depth. That's rejected at runtime. |
 
 ## 5. Tweens
 
@@ -129,11 +131,10 @@ There are two kinds of tween, matching the two ways an animation can manage time
 ### 5.1 Timed tween
 
 ```ts
-interface TimedTween<Name> {
+interface TimedTween<Name> extends RepeatOptions {   // repeatCount must be finite
     name: Name;
     transition: Transition;
     delay?: Seconds;
-    repeat?: Repeat;       // count must be finite
 }
 ```
 
@@ -149,7 +150,12 @@ interface RatioTween<Name> {
 }
 ```
 
-A ratio tween gets its time from its animation. `ratio` is its share of the animation's duration. Ratio tweens that leave `ratio` out split whatever duration is left equally among themselves. A ratio tween has no delay and no repeat. A pause can be made with a tween whose start and end values are the same in the mapping.
+A ratio tween gets its time from its animation. `ratio` is its share of the animation's duration.
+
+- **Given ratios adding up to less than 1:** ratio tweens that leave `ratio` out split what's left equally among themselves. If every tween gives a ratio, what's left is empty time at the end of the animation, like a keyframe at 50% followed by nothing at 100%.
+- **Given ratios adding up to 1 or more:** ratio tweens that leave `ratio` out get nothing, so they make up 0% of the animation. Ratios adding up to more than 1 are normalized: each is divided by their total.
+
+A ratio tween has no delay and no repeat. A pause can be made with a tween whose start and end values are the same in the mapping.
 
 ## 6. Animations
 
@@ -157,12 +163,20 @@ An animation is one or more tweens that **run one after another**. Each tween st
 
 Animations **have no name**. They only gain an identity when they're placed in a sequence, as a named entry (§7). A single animation definition can therefore be placed many times under different names.
 
-Every animation can have a `repeat`, and infinite repetition is allowed.
+Every animation takes options:
+
+```ts
+interface AnimationOptions extends RepeatOptions {
+    delay?: Seconds | Stagger;
+}
+```
+
+Infinite repetition is allowed. `delay` waits before the first play and isn't repeated. It's part of the animation's own time, so it doesn't move the animation's position in a sequence (§7.3). A stagger gives each target its own delay (§7.5).
 
 ### 6.1 Simple animation: `type: 'simple'`
 
 ```ts
-Animation.of(transition, repeat?)
+Animation.of(transition, options?)
 ```
 
 A single tween. The animation is the tween, so there are no tween names. Its transition supplies both duration and easing.
@@ -170,18 +184,17 @@ A single tween. The animation is the tween, so there are no tween names. Its tra
 ### 6.2 Self-timed animation: `type: 'self-timed'`
 
 ```ts
-Animation.of(transition, ratioTweens, repeat?)
+Animation.of(transition, ratioTweens, options?)
 ```
 
-The **animation owns the time**. Its `transition` (any `Transition`, including a physical spring) has two roles:
+The **animation owns the time**. Its `transition` (any `Transition`, including a physical spring) supplies the animation's total duration, which the tweens divide among themselves by ratio (§5.2).
 
-- **Duration:** it supplies the animation's total duration, which the tweens divide among themselves by ratio (§5.2).
-- **Easing:** its easing or spring curve runs across the whole animation and **compounds** with each tween's own transition. The animation's curve shapes overall progress through the animation, and each tween's curve shapes progress within that tween's span.
+Its curve doesn't compound with the tweens' transitions. Compound easing has been deliberately left out for now and may be added later.
 
 ### 6.3 Tween-timed animation: `type: 'tween-timed'`
 
 ```ts
-Animation.of(timedTweens, repeat?)
+Animation.of(timedTweens, options?)
 ```
 
 **Each tween owns its time** (§5.1). The animation's duration is the total of its tweens' delays, durations and repeats.
@@ -204,20 +217,25 @@ A sequence places animations, and other sequences, on a shared timeline.
 
 ```ts
 Sequence.builder()
-    .add(name, animationOrSequence, at?, stagger?)
+    .add(name, animationOrSequence, at?)
     ...
-    .build(repeat?)
+    .build(options?)
 ```
 
 - Every entry has a **name**, which must be unique within its sequence. The name is the entry's identity. Positions refer to entries by name (§7.3), and the mapping is keyed by name (§8).
 - There are three kinds of entry: a simple animation entry, a multi-tween animation entry, and a nested sequence entry. The kind is tracked in the types so the mapping can be derived from it.
-- `stagger` is only available on animation entries.
-- `build(repeat?)` produces the `Sequence` and optionally sets how it repeats.
+- `build(options?)` produces the `Sequence`. Like an animation's, a sequence's options are the repeat options plus a `delay`, which is only ever in seconds:
+
+  ```ts
+  interface SequenceOptions extends RepeatOptions {
+      delay?: Seconds;
+  }
+  ```
 - Entries keep the order they were added in. How that order is stored is an implementation detail and isn't reflected in the types.
 
 ### 7.2 Nesting
 
-A sequence can be an entry in another sequence. It behaves as one unit on the outer timeline: its start is its first entry's start, and its last referenceable point is the latest last referenceable point of its entries (§7.4).
+A sequence can be an entry in another sequence. It behaves as one unit on the outer timeline: its start is where its own `at` places it, and its last referenceable point is worked out from its entries (§7.4). Its entries' positions only place them within it, and never move it on the outer timeline.
 
 ### 7.3 Positions (`at`)
 
@@ -242,15 +260,17 @@ type At<N> =
 - **References can only point backwards.** `N` is the set of names of entries added earlier, so the types reject references to the entry itself or to later entries.
 - **References are local.** They resolve within the same sequence and can't reach into nested sequences.
 - **An omitted `at` means `'+0'`:** start when the previous entry ends.
-- **The first entry's previous point** is the start of the sequence, so a relative position on the first entry counts from there.
+- **The first entry's previous point** is the start of the sequence, so a relative position on the first entry counts from there. A positive position on the first entry works as a delay, and a negative one resolves to 0.
+- **`at` isn't `delay`.** `at` places an entry's referenceable start within its sequence. An animation's or sequence's `delay` only shifts its visible start within its own time, so a reference to the entry's start still resolves to where `at` placed it.
 
 ### 7.4 Last referenceable point
 
 `+` and `-` positions resolve against an entry's **last referenceable point**:
 
-- **Finite animation:** its end, including all repetitions. A repeat delay never follows the last play, so it doesn't extend the end.
-- **Infinitely repeating animation:** infinity can't be referenced, so the last referenceable point is the **end of its first iteration**. The animation keeps running while later entries play.
-- **Nested sequence:** the latest last referenceable point among its entries.
+- **Finite animation:** its end, including its delay and all repetitions. A repeat delay never follows the last play, so it doesn't extend the end.
+- **Infinitely repeating animation:** infinity can't be referenced, so the last referenceable point is the **end of its first iteration**, after its delay. The animation keeps running while later entries play.
+- **Staggered animation:** the last referenceable point of its last target to finish.
+- **Nested sequence:** one play of it lasts until the latest last referenceable point among its entries. From there it works like an animation: its delay counts, finite repetitions count, and if it repeats infinitely, the end of its first iteration is used.
 
 ### 7.5 Stagger
 
@@ -260,11 +280,11 @@ type Stagger = (index: number, total: number) => Seconds;
 stagger(each, { from?, easing? })   // → Stagger
 ```
 
-Stagger applies when an animation entry is mapped to several targets. A stagger is a function that takes a target's index and the total number of targets, and returns that target's start delay.
+Stagger applies when an animation is mapped to several targets. A stagger is a function that takes a target's index and the total number of targets, and returns that target's delay. It's given as an animation's `delay` (§6), in place of a number. Its delays are used as they are: with `from: 'center'` and an even number of targets, even the middle targets wait.
 
 The `stagger` factory builds the common case. Each target starts `each` seconds after the next one closer to the origin given by `from`: `'first'`, `'last'`, `'center'`, or a target index. `easing` distributes the start delays non-linearly across the targets. Any other pattern can be written as a function directly.
 
-Stagger is a timing decision, so it belongs in the definition, even though the number of targets is only known at adaptation.
+Stagger is a timing decision, so it belongs in the definition, even though the number of targets is only known at adaptation. Since stagger affects when entries end, and so where later entries start, timing is resolved at adaptation, once the mapping gives each entry's targets.
 
 ## 8. Adaptation
 
@@ -318,7 +338,7 @@ The mapping therefore mirrors the shape of the sequence tree.
 
 ### 8.6 Telling definitions apart
 
-Every sequence is structurally also an animation, because `Animation`'s only member is the optional `repeat`. `MappingOf` therefore checks for `Sequence` first and falls back to the animation mappings.
+Every sequence is structurally also an animation, because `Animation`'s only member is `options`, and a sequence's options also fit an animation's. `MappingOf` therefore checks for `Sequence` first and falls back to the animation mappings.
 
 ## 9. Example
 
@@ -331,11 +351,11 @@ const heartbeat = Animation.of(                                  // tween-timed
         { name: 'grow', transition: spring({ duration: 0.3, bounce: 0.4 }) },
         { name: 'settle', transition: eased(0.25, 'ease-in-out'), delay: 0.08 },
     ],
-    { count: Infinity, delay: 0.9 },
+    { repeatCount: Infinity, repeatDelay: 0.9 },
 );
 
 const nudge = Animation.of(                                      // self-timed
-    eased(0.48, 'ease-out'),                                     // 0.48s total; ease-out compounds
+    eased(0.48, 'ease-out'),                                     // 0.48s total
     [
         { name: 'away', ratio: 0.2 },
         { name: 'back', ratio: 0.3, transition: { type: 'eased', easing: 'ease-in-out' } },
@@ -382,7 +402,7 @@ The same `fadeIn` definition is placed twice, as `backdrop` and `cta`, and mappe
 | Spring velocity and rest threshold are in progress units | Value units don't exist at definition time; spring motion scales linearly with distance |
 | Ratio tweens take only duration-less transitions | Their duration is given to them; a physical spring would conflict with it |
 | Two multi-tween kinds: animation-owned time (self-timed) and tween-owned time (tween-timed) | The two ways a designer budgets time |
-| Self-timed animations take a full `Transition` | It supplies both the total duration and a curve that compounds with the tweens' curves |
+| Self-timed animations take a full `Transition` | It supplies the total duration; compounding its curve with the tweens' curves is left out for now |
 | No animation-level easing on tween-timed animations | Deliberately left out for now |
 | Infinite repeat on animations and sequences, never on tweens | A tween inside an animation must end for the next tween to start |
 | Animations are unnamed; entries are named | The same animation can be placed many times; identity belongs to the placement |
@@ -391,5 +411,7 @@ The same `fadeIn` definition is placed twice, as `backdrop` and `cta`, and mappe
 | Mappings derived from definition types | The compiler requires every entry and tween to be given values |
 | Simple mappings take start and end only; multi-tween mappings take a start plus one value per tween | Keeps mappings simple; intermediate values are made with more tweens |
 | Mapping nested by sequence | Mirrors the definition tree; entry names only need to be unique within their own sequence |
-| Stagger defined in the definition, targets supplied in the mapping | Stagger is timing; how many targets there are is binding |
+| Stagger defined as an animation's delay, targets supplied in the mapping | Stagger is timing; how many targets there are is binding |
+| Delays live on animations and sequences, positions on entries | A delay only affects an entity's internal time, never its position in a sequence |
+| Timing resolved at adaptation | Stagger depends on the number of targets, which only the mapping gives |
 | Entry order is an implementation detail | Not reflected in the types |

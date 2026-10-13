@@ -18,13 +18,11 @@ export type Stagger = (index: number, total: number) => Seconds;
 export interface SimpleAnimationEntry<N extends string = string> {
     animation: SimpleAnimation;
     at?: At<N>;
-    stagger?: Stagger;
 }
 
 export interface MultiTweenAnimationEntry<A extends MultiTweenAnimation<string[]> = MultiTweenAnimation<string[]>, N extends string = string> {
     animation: A;
     at?: At<N>;
-    stagger?: Stagger;
 }
 
 export interface NestedSequenceEntry<NS extends Sequence = Sequence, N extends string = string> {
@@ -40,8 +38,8 @@ export type SequenceEntries = {
 
 export type RepeatMode = 'loop' | 'reverse' | 'mirror';
 
-export interface Repeat {
-    count: number;             // repetitions after the first play
-    delay?: Seconds;
-    mode?: RepeatMode;
+export interface RepeatOptions {
+    repeatCount?: number;      // repetitions after the first play
+    repeatDelay?: Seconds;
+    repeatMode?: RepeatMode;
 }

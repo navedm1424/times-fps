@@ -1,11 +1,11 @@
 import type {StretchableTransition, Transition} from "./transition.js";
-import type {Ratio, Repeat, Seconds} from "./types.js";
+import type {Ratio, RepeatOptions, Seconds, Stagger} from "./types.js";
 
-export interface TimedTween<Name extends string = string> {
+/** `repeatCount` must be finite. */
+export interface TimedTween<Name extends string = string> extends RepeatOptions {
     name: Name;
     transition: Transition;
     delay?: Seconds;
-    repeat?: Repeat;           // count must be finite
 }
 
 export interface RatioTween<Name extends string = string> {
@@ -14,39 +14,43 @@ export interface RatioTween<Name extends string = string> {
     transition?: StretchableTransition;
 }
 
-export class Animation {
-    protected constructor(readonly repeat?: Repeat) {}
+export interface AnimationOptions extends RepeatOptions {
+    delay?: Seconds | Stagger;
+}
 
-    static of(transition: Transition, repeat?: Repeat): SimpleAnimation;
-    static of<T extends string[]>(transition: Transition, tweens: { [I in keyof T]: RatioTween<T[I]>; }, repeat?: Repeat): SelfTimedAnimation<T>;
-    static of<T extends string[]>(tweens: { [I in keyof T]: TimedTween<T[I]>; }, repeat?: Repeat): TweenTimedAnimation<T>;
+export class Animation {
+    protected constructor(readonly options: AnimationOptions = {}) {}
+
+    static of(transition: Transition, options?: AnimationOptions): SimpleAnimation;
+    static of<T extends string[]>(transition: Transition, tweens: { [I in keyof T]: RatioTween<T[I]>; }, options?: AnimationOptions): SelfTimedAnimation<T>;
+    static of<T extends string[]>(tweens: { [I in keyof T]: TimedTween<T[I]>; }, options?: AnimationOptions): TweenTimedAnimation<T>;
     static of(
         transitionOrTweens: Transition | readonly TimedTween[],
-        tweensOrRepeat?: readonly RatioTween[] | Repeat,
-        repeat?: Repeat
+        tweensOrOptions?: readonly RatioTween[] | AnimationOptions,
+        options?: AnimationOptions
     ): Animation {
         if (!('type' in transitionOrTweens)) {
             const tweens = transitionOrTweens;
             for (const tween of tweens) {
-                if (tween.repeat && !Number.isFinite(tween.repeat.count)) {
+                if (tween.repeatCount !== undefined && !Number.isFinite(tween.repeatCount)) {
                     throw new RangeError(`Tween "${tween.name}" must repeat a finite number of times.`);
                 }
             }
-            return new TweenTimedAnimation(tweens, tweensOrRepeat as Repeat | undefined);
+            return new TweenTimedAnimation(tweens, tweensOrOptions as AnimationOptions | undefined);
         }
 
         const transition = transitionOrTweens;
-        if (tweensOrRepeat === undefined || 'count' in tweensOrRepeat)
-            return new SimpleAnimation(transition, tweensOrRepeat);
+        if (tweensOrOptions === undefined || !('length' in tweensOrOptions))
+            return new SimpleAnimation(transition, tweensOrOptions);
 
-        return new SelfTimedAnimation(transition, tweensOrRepeat, repeat);
+        return new SelfTimedAnimation(transition, tweensOrOptions, options);
     }
 }
 
 export class SimpleAnimation extends Animation {
     readonly type = "simple" as const;
-    constructor(readonly transition: Transition, repeat?: Repeat) {
-        super(repeat);
+    constructor(readonly transition: Transition, options?: AnimationOptions) {
+        super(options);
     }
 }
 
@@ -57,9 +61,9 @@ export class SelfTimedAnimation<T extends string[]> extends Animation {
         readonly tweens: {
             readonly [I in keyof T]: RatioTween<T[I]>;
         },
-        repeat?: Repeat
+        options?: AnimationOptions
     ) {
-        super(repeat);
+        super(options);
     }
 }
 
@@ -69,9 +73,9 @@ export class TweenTimedAnimation<T extends string[]> extends Animation {
         readonly tweens: {
             readonly [I in keyof T]: TimedTween<T[I]>;
         },
-        repeat?: Repeat
+        options?: AnimationOptions
     ) {
-        super(repeat);
+        super(options);
     }
     // easing?: Easing;           // compounds with each tween's easing
 }
