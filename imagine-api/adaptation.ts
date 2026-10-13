@@ -5,7 +5,7 @@ import type {
     MultiTweenAnimationEntry,
     Sequence,
     NestedSequenceEntry, SimpleAnimation
-} from "./definition.js";
+} from "../new-implementation/index.js";
 
 type Target = unknown;
 type Value = unknown;

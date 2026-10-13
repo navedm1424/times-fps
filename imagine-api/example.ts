@@ -4,7 +4,7 @@ import {
     eased,
     spring,
     Animation
-} from "./definition.js";
+} from "../new-implementation/index.js";
 
 type WAAPIEffect = [keyframes: Keyframe[], options: KeyframeAnimationOptions];
 declare const waapi: Adapter<WAAPIEffect[]>;
@@ -20,7 +20,7 @@ const heartbeat = Animation.of(
         { name: 'grow', transition: spring({ duration: 0.3, bounce: 0.4 }) },
         { name: 'settle', transition: eased(0.25, 'ease-in-out'), delay: 0.08 },
     ],
-    { count: Infinity, delay: 0.9 }
+    { repeatCount: Infinity, repeatDelay: 0.9 }
 );
 
 // The animation owns the time and the tweens share it
