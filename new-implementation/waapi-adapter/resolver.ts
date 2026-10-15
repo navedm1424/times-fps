@@ -1,5 +1,5 @@
 import {Sequence} from "../sequence.js";
-import type {RepeatOptions, SequenceEntries, SequenceEntry, Seconds} from "../types.js";
+import type {RepeatOptions, Seconds, SequenceEntries, SequenceEntry} from "../types.js";
 import {checkNumber, parseAt} from "../utils.js";
 import type {SimpleAnimation} from "../animation.js";
 import {linear, type ResolvedEasing} from "./easing.js";
@@ -24,9 +24,6 @@ export interface ResolvedAnimationEffect {
     direction: PlaybackDirection;
     fill: FillMode;
 }
-
-/** A stretch of the plays that one effect runs, before it's placed in time. */
-type PlaySegment = Omit<ResolvedAnimationEffect, 'delay' | 'fill'>;
 
 export class SimpleAnimationResolver {
     readonly targets: Element[];
@@ -64,10 +61,10 @@ export class SimpleAnimationResolver {
         this.repeatOptions.push(options);
     }
 
-    resolveEffects(): Map<Element, ResolvedAnimationEffect[]> {
+    resolve(): Map<Element, ResolvedAnimationEffect[]> {
         if (this.playDuration === 0) return new Map();
 
-        const segments = this.resolveSegments();
+        const segments = this.resolveEffects();
         return new Map(this.targets.map((target, index) => [
             target,
             segments.map(segment => ({...segment, delay: segment.delay + this.targetDelays[index]!}))
@@ -78,77 +75,82 @@ export class SimpleAnimationResolver {
      * The plays' segments one after another, with delays counted from the start of the plays.
      * The first holds its start values through the target's delay and the last keeps its end values.
      */
-    private resolveSegments(): ResolvedAnimationEffect[] {
-        const segments = this.layOutPlays();
-        let start = 0;
-        return segments.map((segment, index) => {
-            const isFirst = index === 0;
-            const isLast = index === segments.length - 1;
-            const fill: FillMode = isFirst && isLast ? 'both' : isFirst ? 'backwards' : isLast ? 'forwards' : 'none';
-            const effect = {...segment, delay: start, fill};
-            start += segment.duration * segment.iterations;
-            return effect;
-        });
-    }
-
-    private layOutPlays(): PlaySegment[] {
+    private resolveEffects(): ResolvedAnimationEffect[] {
         const {playDuration, curve, propertyValues} = this;
         const {repeatCount = 0, repeatDelay = 0, repeatMode = 'loop'} = this.repeatOptions[0] ?? {};
         const hold = repeatDelay / playDuration;
         const playCount = repeatCount + 1;
 
-        if (repeatCount === 0)
-            return [this.playAlone(1, 'normal')];
+        const noRepeat = repeatCount === 0;
+        const nativeRepeat = repeatMode !== 'mirror' && hold === 0;
 
-        if (repeatMode !== 'mirror' && hold === 0)
-            return [this.playAlone(playCount, repeatMode === 'reverse' ? 'alternate' : 'normal')];
+        const {singleEasing: wholeEasing} = curve;
+        const original = wholeEasing && (noRepeat || nativeRepeat)
+            ? ResolvedAnimation.ofStops(propertyValues)
+            : AnimationKeyframesResolver.resolve(curve, propertyValues);
 
-        const original = AnimationKeyframesResolver.resolve(curve, propertyValues);
+        if (noRepeat)
+            return [this.createEffect({animation: original, easing: wholeEasing})];
+        if (nativeRepeat)
+            return [this.createEffect({animation: original, easing: wholeEasing, iterations: playCount, direction: repeatMode === 'reverse' ? 'alternate' : 'normal'})];
+
         if (repeatMode === 'loop') {
+            const originalPlusHold = {animation: original.padEnd(hold), duration: playDuration * (1 + hold)};
             // [original+hold] × ∞
             if (!Number.isFinite(repeatCount))
-                return [this.merged([original], [hold], Infinity)];
+                return [this.createEffect({...originalPlusHold, iterations: Infinity})];
             // [original+hold] × repeatCount, then original on its own
-            return [this.merged([original], [hold], repeatCount), this.playAlone(1, 'normal', original)];
+            return [
+                this.createEffect({...originalPlusHold, iterations: repeatCount, fill: "backwards"}),
+                this.createEffect({animation: original, delay: originalPlusHold.duration * repeatCount, fill: "forwards"})
+            ];
         }
 
         const backward = repeatMode === 'mirror'
             ? AnimationKeyframesResolver.resolve(curve, propertyValues.flip())
             : original.reversed();
+        const pair = {animation: ResolvedAnimation.merge([original, backward], hold), duration: 2 * playDuration * (1 + hold)};
 
         // [original+hold, backward+hold] × ∞
         if (!Number.isFinite(repeatCount))
-            return [this.merged([original, backward], [hold, hold], Infinity)];
+            return [this.createEffect({...pair, iterations: Infinity})];
 
         // [original+hold, backward+hold] × repeatCount/2, then original on its own
-        if (playCount % 2 === 1)
-            return [this.merged([original, backward], [hold, hold], repeatCount / 2), this.playAlone(1, 'normal', original)];
+        if (playCount % 2 === 1) {
+            const iterations = repeatCount / 2;
+            return [
+                this.createEffect({...pair, iterations, fill: "backwards"}),
+                this.createEffect({animation: original, delay: pair.duration * iterations, fill: "forwards"})
+            ];
+        }
+
+        // [original+hold, backward] pair
+        const lastPair = {animation: ResolvedAnimation.merge([original, backward], [hold]), duration: playDuration * (2 + hold)};
+        // [original+hold, backward] once
+        if (playCount === 2)
+            return [this.createEffect(lastPair)];
 
         // [original+hold, backward+hold] × (playCount−2)/2, then [original+hold, backward] once
-        const lastPair = this.merged([original, backward], [hold, 0], 1);
-        if (playCount === 2) return [lastPair];
-        return [this.merged([original, backward], [hold, hold], (playCount - 2) / 2), lastPair];
+        const iterations = (playCount - 2) / 2;
+        return [
+            this.createEffect({...pair, iterations, fill: "backwards"}),
+            this.createEffect({...lastPair, delay: pair.duration * iterations, fill: "forwards"}),
+        ];
     }
 
-    /** One play as an effect of its own, keeping a single easing on the effect rather than in the keyframes; `keyframed` saves resolving the keyframes again. */
-    private playAlone(iterations: number, direction: PlaybackDirection, keyframed?: ResolvedAnimation): PlaySegment {
-        const {curve, propertyValues, playDuration} = this;
-        const {singleEasing} = curve;
-        const animation = singleEasing
-            ? ResolvedAnimation.ofStops(propertyValues)
-            : keyframed ?? AnimationKeyframesResolver.resolve(curve, propertyValues);
-        return {animation, easing: singleEasing ?? linear, duration: playDuration, iterations, direction};
-    }
-
-    /** Plays laid out one after another, each followed by its hold, with their curves already in the keyframes. */
-    private merged(plays: readonly ResolvedAnimation[], holds: readonly number[], iterations: number): PlaySegment {
-        return {
-            animation: ResolvedAnimation.merge(plays, 0, index => holds[index]!),
-            easing: linear,
-            duration: holds.reduce((total, hold) => total + this.playDuration * (1 + hold), 0),
-            iterations,
-            direction: 'normal'
-        };
+    private createEffect(
+        { animation, duration = this.playDuration, easing = linear, delay = 0, iterations = 1, direction = "normal", fill = "both"}:
+        {
+            animation: ResolvedAnimation,
+            duration?: number,
+            easing?: ResolvedEasing,
+            delay?: number,
+            iterations?: number,
+            direction?: PlaybackDirection,
+            fill?: FillMode
+        }
+    ): ResolvedAnimationEffect {
+        return { animation, easing, duration, delay, iterations, direction, fill };
     }
 }
 

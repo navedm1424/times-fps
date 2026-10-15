@@ -74,17 +74,15 @@ export class ResolvedAnimation {
 
     /**
      * Lays the animations out one after another, each counting as one play.
-     * `delayBefore` and `delayAfter` give the delays around the animation at the index, as fractions of a play; a number delays every animation.
+     * `delayAfter` gives the delays after the animation at the index, as fractions of a play; a number delays every animation.
      */
     static merge(
         animations: readonly ResolvedAnimation[],
-        delayBefore: DynamicDelay = 0,
         delayAfter: DynamicDelay = 0
     ): ResolvedAnimation {
         const padded = animations.map((animation, index) => {
-            const before = resolveDelay(delayBefore, index, animations.length);
             const after = resolveDelay(delayAfter, index, animations.length);
-            return {animation: animation.padStart(before).padEnd(after / (1 + before)), length: before + 1 + after};
+            return {animation: animation.padEnd(after), length: 1 + after};
         });
 
         const totalLength = padded.reduce((total, {length}) => total + length, 0);
@@ -119,7 +117,7 @@ export class ResolvedAnimation {
     }
 
     /** Holds the end values for `padding`, a fraction of the animation's length. */
-    private padEnd(padding: number): ResolvedAnimation {
+    padEnd(padding: number): ResolvedAnimation {
         if (padding <= 0) return this;
         return this.scaleToRange(0, 1 / (1 + padding)).mapKeyframes(keyframes => [
             ...keyframes,

@@ -136,7 +136,7 @@ function render(): void {
         const transition = transitionOf(currentKind(), valuesByKind[currentKind()]);
         const {spring, duration} = resolveSpring(transition);
         const target = document.createElement('div');
-        const [effect] = new SimpleAnimationResolver(Animation.of(transition), {target, values: {progress: {0: 0, 1: 1}}}).resolveEffects().get(target)!;
+        const [effect] = new SimpleAnimationResolver(Animation.of(transition), {target, values: {progress: {0: 0, 1: 1}}}).resolve().get(target)!;
         const keyframes = effect!.animation.keyframesByProperty.progress!;
         playableFit = {keyframes, easing: effect!.easing, duration};
         const fitAt = fittedProgressAt(keyframes, duration);
