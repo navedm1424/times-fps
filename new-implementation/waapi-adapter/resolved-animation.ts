@@ -52,6 +52,16 @@ class ResolvedAnimationKeyframe {
     }
 }
 
+type DynamicDelay = number | number[] | ((index: number, total: number) => number);
+function resolveDelay(delay: DynamicDelay, index: number, total: number) {
+    return (
+        typeof delay === "function" ?
+            delay(index, total) :
+            typeof delay === "number" ?
+                delay : delay[index]
+    ) ?? 0;
+}
+
 export class ResolvedAnimation {
     constructor(readonly keyframesByProperty: { [property: string]: ResolvedAnimationKeyframe[] }) {}
 
@@ -64,12 +74,17 @@ export class ResolvedAnimation {
 
     /**
      * Lays the animations out one after another, each counting as one play.
-     * `delayBefore` gives the delay before the animation at the index, as a fraction of a play; a number delays every animation.
+     * `delayBefore` and `delayAfter` give the delays around the animation at the index, as fractions of a play; a number delays every animation.
      */
-    static merge(animations: readonly ResolvedAnimation[], delayBefore: number | ((index: number) => number) = 0): ResolvedAnimation {
+    static merge(
+        animations: readonly ResolvedAnimation[],
+        delayBefore: DynamicDelay = 0,
+        delayAfter: DynamicDelay = 0
+    ): ResolvedAnimation {
         const padded = animations.map((animation, index) => {
-            const delay = typeof delayBefore === 'number' ? delayBefore : delayBefore(index);
-            return {animation: animation.padStart(delay), length: delay + 1};
+            const before = resolveDelay(delayBefore, index, animations.length);
+            const after = resolveDelay(delayAfter, index, animations.length);
+            return {animation: animation.padStart(before).padEnd(after / (1 + before)), length: before + 1 + after};
         });
 
         const totalLength = padded.reduce((total, {length}) => total + length, 0);

@@ -33,7 +33,8 @@ describe("SimpleAnimationResolver", () => {
     for (const repeatMode of ['loop', 'mirror', 'reverse'] as const) {
         it(`resolves a ${repeatMode} repeat with a repeat delay`, () => {
             const animation = Animation.of(eased(0.4, 'easeInOut'), {repeatCount: 3, repeatDelay: 0.2, repeatMode});
-            new SimpleAnimationResolver(animation, {target, values}).resolveEffects();
+            const effects = new SimpleAnimationResolver(animation, {target, values}).resolveEffects();
+            console.log(effects);
         });
     }
 });

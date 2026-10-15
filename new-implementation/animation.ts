@@ -1,5 +1,6 @@
 import type {Transition} from "./transition.js";
 import type {RepeatOptions, Seconds, Stagger} from "./types.js";
+import {checkNumber, clampedDelay, clampedRepeats} from "./utils.js";
 
 /** `repeatCount` must be finite. */
 export interface TimedTween<Name extends string = string> extends RepeatOptions {
@@ -28,17 +29,31 @@ export class Animation {
         transitionOrTweens: Transition | readonly TimedTween[],
         options?: AnimationOptions
     ): Animation {
+        if (options) {
+            if (typeof options.delay === 'number') checkNumber(options.delay, "The animation's delay");
+            checkNumber(options.repeatDelay, "The animation's repeat delay");
+            checkNumber(options.repeatCount, "The animation's repeat count", {allowInfinity: true});
+        }
+
         if (Array.isArray(transitionOrTweens)) {
             const tweens: TimedTween[] = transitionOrTweens;
             for (const tween of tweens) {
-                if (tween.repeatCount !== undefined && !Number.isFinite(tween.repeatCount))
-                    throw new RangeError(`Tween "${tween.name}" must repeat a finite number of times.`);
+                checkNumber(tween.repeatCount, `Tween "${tween.name}"'s repeat count`);
+                checkNumber(tween.delay, `Tween "${tween.name}"'s delay`);
+                checkNumber(tween.repeatDelay, `Tween "${tween.name}"'s repeat delay`);
+                checkTransition(tween.transition, `Tween "${tween.name}"'s transition`);
             }
-            return new TimedTweenAnimation(tweens, options);
+            return new TimedTweenAnimation(tweens.map(tween => clampedDelay(clampedRepeats(tween))), options && clampedDelay(clampedRepeats(options)));
         }
 
-        return new SimpleAnimation(transitionOrTweens as Transition, options);
+        checkTransition(transitionOrTweens as Transition, "The animation's transition");
+        return new SimpleAnimation(transitionOrTweens as Transition, options && clampedDelay(clampedRepeats(options)));
     }
+}
+
+function checkTransition(transition: Transition, label: string): void {
+    if ('duration' in transition) checkNumber(transition.duration, `${label}'s duration`);
+    if ('visualDuration' in transition) checkNumber(transition.visualDuration, `${label}'s visual duration`);
 }
 
 export class SimpleAnimation extends Animation {

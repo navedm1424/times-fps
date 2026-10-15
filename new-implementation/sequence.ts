@@ -7,6 +7,7 @@ import type {
     SimpleAnimationEntry
 } from "./types.js";
 import type {SimpleAnimation, TimedTweenAnimation} from "./animation.js";
+import {checkNumber, clampedDelay, clampedRepeats} from "./utils.js";
 
 export class SequenceBuilder<SE extends SequenceEntries = {}> {
     private readonly names: string[] = [];
@@ -53,10 +54,14 @@ export class SequenceBuilder<SE extends SequenceEntries = {}> {
     }
 
     build(options: SequenceOptions = {}): Sequence<{ [K in keyof SE]: SE[K] }> {
+        checkNumber(options.delay, "The sequence's delay");
+        checkNumber(options.repeatDelay, "The sequence's repeat delay");
+        checkNumber(options.repeatCount, "The sequence's repeat count", {allowInfinity: true});
+
         if (options.repeatCount === Infinity && Object.values(this.entries).some(repeatsInfinitely))
             throw new RangeError("A sequence containing an infinitely repeating entry can't repeat infinitely.");
 
-        return new Sequence(this.names, this.entries as { [K in keyof SE]: SE[K] }, options);
+        return new Sequence(this.names, this.entries as { [K in keyof SE]: SE[K] }, clampedDelay(clampedRepeats(options)));
     }
 }
 

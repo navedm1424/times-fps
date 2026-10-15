@@ -1,6 +1,6 @@
 import {Sequence} from "../sequence.js";
-import type {RepeatOptions, SequenceEntries, SequenceEntry, Seconds, Stagger} from "../types.js";
-import {parseAt} from "../utils.js";
+import type {RepeatOptions, SequenceEntries, SequenceEntry, Seconds} from "../types.js";
+import {checkNumber, parseAt} from "../utils.js";
 import type {SimpleAnimation} from "../animation.js";
 import {linear, type ResolvedEasing} from "./easing.js";
 import {resolveTransition, type TransitionCurve} from "./transition-curve.js";
@@ -15,17 +15,22 @@ export type SimpleAnimationMapping = {
 };
 
 /** One WAAPI effect's worth of the animation; effects play one after another. */
-interface ResolvedAnimationEffect {
+export interface ResolvedAnimationEffect {
     animation: ResolvedAnimation;
     easing: ResolvedEasing;
     delay: Seconds;
     duration: Seconds;
     iterations: number;
     direction: PlaybackDirection;
+    fill: FillMode;
 }
 
+/** A stretch of the plays that one effect runs, before it's placed in time. */
+type PlaySegment = Omit<ResolvedAnimationEffect, 'delay' | 'fill'>;
+
 export class SimpleAnimationResolver {
-    readonly delay: Seconds | Stagger;
+    readonly targets: Element[];
+    readonly targetDelays: Seconds[];
     readonly playDuration: Seconds;
     readonly totalDuration: Seconds;
     readonly curve: TransitionCurve;
@@ -35,7 +40,13 @@ export class SimpleAnimationResolver {
 
     constructor(animation: SimpleAnimation, mapping: SimpleAnimationMapping) {
         const {duration, curve} = resolveTransition(animation.transition);
-        this.delay = animation.options.delay ?? 0;
+        const {delay = 0} = animation.options;
+        const targets = [mapping.target].flat();
+        this.targets = targets;
+        this.targetDelays = targets.map((_, index) => {
+            if (typeof delay === 'number') return delay;
+            return Math.max(0, checkNumber(delay(index, targets.length), `The staggered delay of target ${index}`));
+        });
         this.playDuration = duration;
         this.totalDuration = this.repeatedDuration(duration, animation.options);
         this.curve = curve;
@@ -53,67 +64,92 @@ export class SimpleAnimationResolver {
         this.repeatOptions.push(options);
     }
 
-    resolveEffects(): ResolvedAnimationEffect[] {
+    resolveEffects(): Map<Element, ResolvedAnimationEffect[]> {
+        if (this.playDuration === 0) return new Map();
+
+        const segments = this.resolveSegments();
+        return new Map(this.targets.map((target, index) => [
+            target,
+            segments.map(segment => ({...segment, delay: segment.delay + this.targetDelays[index]!}))
+        ]));
+    }
+
+    /**
+     * The plays' segments one after another, with delays counted from the start of the plays.
+     * The first holds its start values through the target's delay and the last keeps its end values.
+     */
+    private resolveSegments(): ResolvedAnimationEffect[] {
+        const segments = this.layOutPlays();
+        let start = 0;
+        return segments.map((segment, index) => {
+            const isFirst = index === 0;
+            const isLast = index === segments.length - 1;
+            const fill: FillMode = isFirst && isLast ? 'both' : isFirst ? 'backwards' : isLast ? 'forwards' : 'none';
+            const effect = {...segment, delay: start, fill};
+            start += segment.duration * segment.iterations;
+            return effect;
+        });
+    }
+
+    private layOutPlays(): PlaySegment[] {
         const {playDuration, curve, propertyValues} = this;
-
-        const singleEasing = curve.singleEasing;
-        const alone: Pick<ResolvedAnimationEffect, 'animation' | 'easing'> = singleEasing
-            ? {animation: ResolvedAnimation.ofStops(propertyValues), easing: singleEasing}
-            : {animation: AnimationKeyframesResolver.resolve(curve, propertyValues), easing: linear};
-
         const {repeatCount = 0, repeatDelay = 0, repeatMode = 'loop'} = this.repeatOptions[0] ?? {};
         const hold = repeatDelay / playDuration;
         const playCount = repeatCount + 1;
 
         if (repeatCount === 0)
-            return [playOnce(alone, playDuration)];
+            return [this.playAlone(1, 'normal')];
 
         if (repeatMode !== 'mirror' && hold === 0)
-            return [{...alone, delay: 0, duration: playDuration, iterations: playCount, direction: repeatMode === 'reverse' ? 'alternate' : 'normal'}];
+            return [this.playAlone(playCount, repeatMode === 'reverse' ? 'alternate' : 'normal')];
 
-        const original = singleEasing ? AnimationKeyframesResolver.resolve(curve, propertyValues) : alone.animation;
+        const original = AnimationKeyframesResolver.resolve(curve, propertyValues);
         if (repeatMode === 'loop') {
-            const delayedPlay = ResolvedAnimation.merge([original], hold);
-            return [
-                playOnce(alone, playDuration),
-                repeated(delayedPlay, {delay: playDuration, duration: playDuration * (1 + hold), iterations: repeatCount})
-            ];
+            // [original+hold] × ∞
+            if (!Number.isFinite(repeatCount))
+                return [this.merged([original], [hold], Infinity)];
+            // [original+hold] × repeatCount, then original on its own
+            return [this.merged([original], [hold], repeatCount), this.playAlone(1, 'normal', original)];
         }
 
         const backward = repeatMode === 'mirror'
             ? AnimationKeyframesResolver.resolve(curve, propertyValues.flip())
             : original.reversed();
-        const delayedPairDuration = playDuration * 2 * (1 + hold);
 
-        if (playCount % 2 === 1) {
-            const delayedPair = ResolvedAnimation.merge([backward, original], hold);
-            return [
-                playOnce(alone, playDuration),
-                repeated(delayedPair, {delay: playDuration, duration: delayedPairDuration, iterations: repeatCount / 2})
-            ];
-        }
+        // [original+hold, backward+hold] × ∞
+        if (!Number.isFinite(repeatCount))
+            return [this.merged([original, backward], [hold, hold], Infinity)];
 
-        const firstPair = ResolvedAnimation.merge([original, backward], index => index === 0 ? 0 : hold);
-        const firstPairDuration = playDuration * (2 + hold);
-        const firstPairEffect = repeated(firstPair, {delay: 0, duration: firstPairDuration, iterations: 1});
-        if (playCount === 2) return [firstPairEffect];
+        // [original+hold, backward+hold] × repeatCount/2, then original on its own
+        if (playCount % 2 === 1)
+            return [this.merged([original, backward], [hold, hold], repeatCount / 2), this.playAlone(1, 'normal', original)];
 
-        const delayedPair = ResolvedAnimation.merge([original, backward], hold);
-        return [
-            firstPairEffect,
-            repeated(delayedPair, {delay: firstPairDuration, duration: delayedPairDuration, iterations: (playCount - 2) / 2})
-        ];
+        // [original+hold, backward+hold] × (playCount−2)/2, then [original+hold, backward] once
+        const lastPair = this.merged([original, backward], [hold, 0], 1);
+        if (playCount === 2) return [lastPair];
+        return [this.merged([original, backward], [hold, hold], (playCount - 2) / 2), lastPair];
     }
-}
 
-/** A play that runs once, from the start. */
-function playOnce(play: Pick<ResolvedAnimationEffect, 'animation' | 'easing'>, duration: Seconds): ResolvedAnimationEffect {
-    return {...play, delay: 0, duration, iterations: 1, direction: 'normal'};
-}
+    /** One play as an effect of its own, keeping a single easing on the effect rather than in the keyframes; `keyframed` saves resolving the keyframes again. */
+    private playAlone(iterations: number, direction: PlaybackDirection, keyframed?: ResolvedAnimation): PlaySegment {
+        const {curve, propertyValues, playDuration} = this;
+        const {singleEasing} = curve;
+        const animation = singleEasing
+            ? ResolvedAnimation.ofStops(propertyValues)
+            : keyframed ?? AnimationKeyframesResolver.resolve(curve, propertyValues);
+        return {animation, easing: singleEasing ?? linear, duration: playDuration, iterations, direction};
+    }
 
-/** Merged plays, whose curves are already in their keyframes. */
-function repeated(animation: ResolvedAnimation, timing: Pick<ResolvedAnimationEffect, 'delay' | 'duration' | 'iterations'>): ResolvedAnimationEffect {
-    return {animation, easing: linear, direction: 'normal', ...timing};
+    /** Plays laid out one after another, each followed by its hold, with their curves already in the keyframes. */
+    private merged(plays: readonly ResolvedAnimation[], holds: readonly number[], iterations: number): PlaySegment {
+        return {
+            animation: ResolvedAnimation.merge(plays, 0, index => holds[index]!),
+            easing: linear,
+            duration: holds.reduce((total, hold) => total + this.playDuration * (1 + hold), 0),
+            iterations,
+            direction: 'normal'
+        };
+    }
 }
 
 class SequenceResolver {
@@ -130,13 +166,16 @@ class SequenceResolver {
 
             let resolvedEntryStart: number;
             if (parsedAt.kind === 'absolute')
-                resolvedEntryStart = parsedAt.time;
-            else if (parsedAt.reference) {
-                if (!resolversMap.has(parsedAt.reference))
-                    throw new Error(`Invalid reference at: ${parsedAt.reference}`);
-                resolvedEntryStart = resolversMap.get(parsedAt.reference)![parsedAt.anchor] + parsedAt.offset;
-            } else
-                resolvedEntryStart = (lastResolver?.[parsedAt.anchor] ?? 0) + parsedAt.offset;
+                resolvedEntryStart = checkNumber(parsedAt.time, `Entry "${String(name)}"'s position`);
+            else {
+                checkNumber(parsedAt.offset, `Entry "${String(name)}"'s position offset`);
+                if (parsedAt.reference) {
+                    if (!resolversMap.has(parsedAt.reference))
+                        throw new Error(`Invalid reference at: ${parsedAt.reference}`);
+                    resolvedEntryStart = resolversMap.get(parsedAt.reference)![parsedAt.anchor] + parsedAt.offset;
+                } else
+                    resolvedEntryStart = (lastResolver?.[parsedAt.anchor] ?? 0) + parsedAt.offset;
+            }
 
             if (resolvedEntryStart < 0)
                 resolvedEntryStart = 0;
