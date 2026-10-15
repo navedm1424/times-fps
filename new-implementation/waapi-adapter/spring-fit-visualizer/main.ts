@@ -4,7 +4,7 @@ import type {Seconds} from "../../types.js";
 import {invLerp, lerp} from "../../utils.js";
 import {CubicBezier} from "../cubic-bezier.js";
 import {CubicBezierEasing} from "../easing.js";
-import {resolveSimpleAnimation} from "../resolver.js";
+import {SimpleAnimationResolver} from "../resolver.js";
 import {resolveSpring, SpringSplineFitter} from "../spring-fit.js";
 
 type Kind = 'physical' | 'perceptual' | 'visual';
@@ -135,7 +135,7 @@ function render(): void {
         failure.classList.add('hidden');
         const transition = transitionOf(currentKind(), valuesByKind[currentKind()]);
         const {spring, duration} = resolveSpring(transition);
-        const [effect] = resolveSimpleAnimation(Animation.of(transition), {target: [], values: {progress: {0: 0, 1: 1}}});
+        const [effect] = new SimpleAnimationResolver(Animation.of(transition), {target: [], values: {progress: {0: 0, 1: 1}}}).resolveEffects();
         const keyframes = effect!.animation.keyframesByProperty.progress!;
         playableFit = {keyframes, easing: effect!.easing, duration};
         const fitAt = fittedProgressAt(keyframes, duration);

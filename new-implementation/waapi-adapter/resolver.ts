@@ -1,9 +1,9 @@
 import {Sequence} from "../sequence.js";
-import type {SequenceEntries, SequenceEntry, Seconds} from "../types.js";
+import type {RepeatOptions, SequenceEntries, SequenceEntry, Seconds, Stagger} from "../types.js";
 import {parseAt} from "../utils.js";
 import type {SimpleAnimation} from "../animation.js";
 import {linear, type ResolvedEasing} from "./easing.js";
-import {resolveTransition} from "./transition-curve.js";
+import {resolveTransition, type TransitionCurve} from "./transition-curve.js";
 import {PropertyValues, type ValueStops} from "./stops.js";
 import {AnimationKeyframesResolver, ResolvedAnimation} from "./resolved-animation.js";
 
@@ -24,59 +24,86 @@ interface ResolvedAnimationEffect {
     direction: PlaybackDirection;
 }
 
-export function resolveSimpleAnimation(animation: SimpleAnimation, mapping: SimpleAnimationMapping): ResolvedAnimationEffect[] {
-    const {duration, curve} = resolveTransition(animation.transition);
+export class SimpleAnimationResolver {
+    readonly delay: Seconds | Stagger;
+    readonly playDuration: Seconds;
+    readonly totalDuration: Seconds;
+    readonly curve: TransitionCurve;
+    readonly propertyValues: PropertyValues;
+    /** The animation's own first, then each enclosing sequence's, compounding on the ones before. */
+    readonly repeatOptions: RepeatOptions[];
 
-    // Validating the interpolation
-    const propertyValues = PropertyValues.of(mapping.values);
-
-    const singleEasing = curve.singleEasing;
-    const alone: Pick<ResolvedAnimationEffect, 'animation' | 'easing'> = singleEasing
-        ? {animation: ResolvedAnimation.ofStops(propertyValues), easing: singleEasing}
-        : {animation: AnimationKeyframesResolver.resolve(curve, propertyValues), easing: linear};
-
-    const {repeatCount = 0, repeatDelay = 0, repeatMode = 'loop'} = animation.options;
-    const hold = repeatDelay / duration;
-    const playCount = repeatCount + 1;
-
-    if (repeatCount === 0)
-        return [playOnce(alone, duration)];
-
-    if (repeatMode !== 'mirror' && hold === 0)
-        return [{...alone, delay: 0, duration, iterations: playCount, direction: repeatMode === 'reverse' ? 'alternate' : 'normal'}];
-
-    const original = singleEasing ? AnimationKeyframesResolver.resolve(curve, propertyValues) : alone.animation;
-    if (repeatMode === 'loop') {
-        const delayedPlay = ResolvedAnimation.merge([original], hold);
-        return [
-            playOnce(alone, duration),
-            repeated(delayedPlay, {delay: duration, duration: duration * (1 + hold), iterations: repeatCount})
-        ];
+    constructor(animation: SimpleAnimation, mapping: SimpleAnimationMapping) {
+        const {duration, curve} = resolveTransition(animation.transition);
+        this.delay = animation.options.delay ?? 0;
+        this.playDuration = duration;
+        this.totalDuration = this.repeatedDuration(duration, animation.options);
+        this.curve = curve;
+        // Validating the interpolation
+        this.propertyValues = PropertyValues.of(mapping.values);
+        this.repeatOptions = [animation.options];
     }
 
-    const backward = repeatMode === 'mirror'
-        ? AnimationKeyframesResolver.resolve(curve, propertyValues.flip())
-        : original.reversed();
-    const delayedPairDuration = duration * 2 * (1 + hold);
-
-    if (playCount % 2 === 1) {
-        const delayedPair = ResolvedAnimation.merge([backward, original], hold);
-        return [
-            playOnce(alone, duration),
-            repeated(delayedPair, {delay: duration, duration: delayedPairDuration, iterations: repeatCount / 2})
-        ];
+    private repeatedDuration(playDuration: Seconds, {repeatCount = 0, repeatDelay = 0}: RepeatOptions): Seconds {
+        if (repeatCount === Infinity) return Infinity;
+        return playDuration * (repeatCount + 1) + repeatDelay * repeatCount;
     }
 
-    const firstPair = ResolvedAnimation.merge([original, backward], index => index === 0 ? 0 : hold);
-    const firstPairDuration = duration * (2 + hold);
-    const firstPairEffect = repeated(firstPair, {delay: 0, duration: firstPairDuration, iterations: 1});
-    if (playCount === 2) return [firstPairEffect];
+    addRepeat(options: RepeatOptions) {
+        this.repeatOptions.push(options);
+    }
 
-    const delayedPair = ResolvedAnimation.merge([original, backward], hold);
-    return [
-        firstPairEffect,
-        repeated(delayedPair, {delay: firstPairDuration, duration: delayedPairDuration, iterations: (playCount - 2) / 2})
-    ];
+    resolveEffects(): ResolvedAnimationEffect[] {
+        const {playDuration, curve, propertyValues} = this;
+
+        const singleEasing = curve.singleEasing;
+        const alone: Pick<ResolvedAnimationEffect, 'animation' | 'easing'> = singleEasing
+            ? {animation: ResolvedAnimation.ofStops(propertyValues), easing: singleEasing}
+            : {animation: AnimationKeyframesResolver.resolve(curve, propertyValues), easing: linear};
+
+        const {repeatCount = 0, repeatDelay = 0, repeatMode = 'loop'} = this.repeatOptions[0] ?? {};
+        const hold = repeatDelay / playDuration;
+        const playCount = repeatCount + 1;
+
+        if (repeatCount === 0)
+            return [playOnce(alone, playDuration)];
+
+        if (repeatMode !== 'mirror' && hold === 0)
+            return [{...alone, delay: 0, duration: playDuration, iterations: playCount, direction: repeatMode === 'reverse' ? 'alternate' : 'normal'}];
+
+        const original = singleEasing ? AnimationKeyframesResolver.resolve(curve, propertyValues) : alone.animation;
+        if (repeatMode === 'loop') {
+            const delayedPlay = ResolvedAnimation.merge([original], hold);
+            return [
+                playOnce(alone, playDuration),
+                repeated(delayedPlay, {delay: playDuration, duration: playDuration * (1 + hold), iterations: repeatCount})
+            ];
+        }
+
+        const backward = repeatMode === 'mirror'
+            ? AnimationKeyframesResolver.resolve(curve, propertyValues.flip())
+            : original.reversed();
+        const delayedPairDuration = playDuration * 2 * (1 + hold);
+
+        if (playCount % 2 === 1) {
+            const delayedPair = ResolvedAnimation.merge([backward, original], hold);
+            return [
+                playOnce(alone, playDuration),
+                repeated(delayedPair, {delay: playDuration, duration: delayedPairDuration, iterations: repeatCount / 2})
+            ];
+        }
+
+        const firstPair = ResolvedAnimation.merge([original, backward], index => index === 0 ? 0 : hold);
+        const firstPairDuration = playDuration * (2 + hold);
+        const firstPairEffect = repeated(firstPair, {delay: 0, duration: firstPairDuration, iterations: 1});
+        if (playCount === 2) return [firstPairEffect];
+
+        const delayedPair = ResolvedAnimation.merge([original, backward], hold);
+        return [
+            firstPairEffect,
+            repeated(delayedPair, {delay: firstPairDuration, duration: delayedPairDuration, iterations: (playCount - 2) / 2})
+        ];
+    }
 }
 
 /** A play that runs once, from the start. */
@@ -90,13 +117,13 @@ function repeated(animation: ResolvedAnimation, timing: Pick<ResolvedAnimationEf
 }
 
 class SequenceResolver {
-    static resolve<SE extends SequenceEntries>(start: number, sequence: Sequence<SE>): ResolvedSequence {
+    static of<SE extends SequenceEntries>(start: number, sequence: Sequence<SE>) {
         if (sequence.names.length === 0)
             throw new Error("Sequence must not be empty.");
 
-        let lastResolvedEntry: ResolvedSequenceEntry | undefined;
-        const resolvedEntriesMap = new Map<keyof SE, ResolvedSequenceEntry>();
-        const resolvedEntries: ResolvedSequenceEntry[] = [];
+        let lastResolver: SequenceEntryResolver | undefined;
+        const resolversMap = new Map<keyof SE, SequenceEntryResolver>();
+        const resolvers: SequenceEntryResolver[] = [];
         for (const name of sequence.names) {
             const entry = sequence.entries[name]!;
             const parsedAt = parseAt(entry.at ?? "+0");
@@ -105,48 +132,37 @@ class SequenceResolver {
             if (parsedAt.kind === 'absolute')
                 resolvedEntryStart = parsedAt.time;
             else if (parsedAt.reference) {
-                if (!resolvedEntriesMap.has(parsedAt.reference))
+                if (!resolversMap.has(parsedAt.reference))
                     throw new Error(`Invalid reference at: ${parsedAt.reference}`);
-                resolvedEntryStart = resolvedEntriesMap.get(parsedAt.reference)![parsedAt.anchor] + parsedAt.offset;
+                resolvedEntryStart = resolversMap.get(parsedAt.reference)![parsedAt.anchor] + parsedAt.offset;
             } else
-                resolvedEntryStart = (lastResolvedEntry?.[parsedAt.anchor] ?? 0) + parsedAt.offset;
+                resolvedEntryStart = (lastResolver?.[parsedAt.anchor] ?? 0) + parsedAt.offset;
 
             if (resolvedEntryStart < 0)
                 resolvedEntryStart = 0;
 
-            const resolvedEntry = SequenceEntryResolver.resolve(start + (sequence.options.delay ?? 0) + resolvedEntryStart, entry);
-            resolvedEntriesMap.set(name, lastResolvedEntry = resolvedEntry);
-            resolvedEntries.push(resolvedEntry);
+            const resolvedEntry = SequenceEntryResolver.of(start + (sequence.options.delay ?? 0) + resolvedEntryStart, entry);
+            resolversMap.set(name, lastResolver = resolvedEntry);
+            resolvers.push(resolvedEntry);
         }
 
-        const {referenceableEnd} = lastResolvedEntry!;
-        if (sequence.options.repeatCount) {
-            resolvedEntries.forEach(entry => {
-                if (entry === lastResolvedEntry) return;
-                entry.addEndDelay((sequence.options.repeatDelay ?? 0) + (referenceableEnd - entry.referenceableEnd));
+        const {referenceableEnd} = lastResolver!;
+        const {repeatCount, repeatMode, repeatDelay} = sequence.options;
+        if (repeatCount) {
+            resolvers.forEach(entry => {
+                if (entry === lastResolver) return;
+                // entry.addRepeat({ repeatCount, repeatMode, repeatDelay:  });
             });
         }
-        return new ResolvedSequence(start, referenceableEnd);
+        // return new SequenceResolver(start, referenceableEnd);
     }
 }
 
 declare class SequenceEntryResolver {
-    static resolve(resolvedStart: number, entry: SequenceEntry): ResolvedSequenceEntry;
-}
-
-class ResolvedSequence {
-    constructor(
-        readonly start: number,
-        readonly referenceableEnd: number,
-    ) {}
-}
-
-declare class ResolvedSequenceEntry {
     readonly start: number;
     readonly referenceableEnd: number;
     readonly totalDuration: number;
+    static of(resolvedStart: number, entry: SequenceEntry): SequenceEntryResolver;
 
-    get endDelay(): number;
-
-    addEndDelay(endDelay: number): void;
+    addRepeat(options: RepeatOptions): void;
 }
