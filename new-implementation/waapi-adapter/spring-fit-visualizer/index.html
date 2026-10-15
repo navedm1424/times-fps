@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Spring Fit Visualizer</title>
+    <style>
+        :root {
+            --background: #fbfbfa;
+            --surface: #ffffff;
+            --text: #1d1d1f;
+            --muted: #6e6e73;
+            --grid: #e6e6e6;
+            --spring: #2f6fde;
+            --fit: #e0592a;
+            --knot: #1d1d1f;
+            --band: rgba(47, 111, 222, 0.08);
+            color-scheme: light dark;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --background: #161617;
+                --surface: #1f1f21;
+                --text: #f2f2f2;
+                --muted: #9a9aa0;
+                --grid: #333336;
+                --spring: #6d9df5;
+                --fit: #f2804f;
+                --knot: #f2f2f2;
+                --band: rgba(109, 157, 245, 0.12);
+            }
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            padding: 24px 16px 48px;
+            background: var(--background);
+            color: var(--text);
+            font: 14px/1.45 system-ui, -apple-system, sans-serif;
+        }
+        main { max-width: 1040px; margin: 0 auto; display: grid; gap: 16px; }
+        h1 { font-size: 20px; margin: 0; }
+        .panel { background: var(--surface); border: 1px solid var(--grid); border-radius: 10px; padding: 16px; }
+        .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px 20px; }
+        label { display: grid; gap: 4px; color: var(--muted); font-size: 13px; }
+        label span.value { color: var(--text); font-variant-numeric: tabular-nums; }
+        .label-row { display: flex; justify-content: space-between; }
+        input[type=range], select { width: 100%; }
+        .stats { display: flex; flex-wrap: wrap; gap: 8px 24px; font-variant-numeric: tabular-nums; }
+        .stats div span { color: var(--muted); margin-right: 6px; }
+        .legend { display: flex; gap: 16px; color: var(--muted); font-size: 13px; }
+        .legend i { display: inline-block; width: 18px; height: 3px; vertical-align: middle; margin-right: 6px; border-radius: 2px; }
+        svg { width: 100%; height: auto; display: block; }
+        svg text { fill: var(--muted); font-size: 11px; }
+        .playback { display: flex; align-items: center; gap: 16px; }
+        .playback button {
+            padding: 6px 16px; border: 1px solid var(--grid); border-radius: 8px;
+            background: var(--background); color: var(--text); font: inherit; cursor: pointer;
+        }
+        .track { position: relative; flex: 1; height: 24px; }
+        .track::before {
+            content: ""; position: absolute; left: 12px; right: 12px; top: 11px; height: 2px;
+            background: var(--grid); border-radius: 1px;
+        }
+        .ball { position: absolute; top: 0; left: 0; width: 24px; height: 24px; border-radius: 50%; background: var(--fit); }
+        .error { color: #d33; white-space: pre-wrap; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+<main>
+    <h1>Spring vs. fitted Bézier spline</h1>
+
+    <section class="panel controls" id="controls">
+        <label>
+            <div class="label-row">Kind</div>
+            <select id="kind">
+                <option value="physical">Physical (stiffness, damping, mass)</option>
+                <option value="perceptual">Perceptual (duration, bounce)</option>
+                <option value="visual">Visual (visualDuration, bounce)</option>
+            </select>
+        </label>
+    </section>
+
+    <section class="panel stats" id="stats"></section>
+
+    <section class="panel playback">
+        <button id="play" type="button">Play</button>
+        <div class="track" id="track"><div class="ball" id="ball"></div></div>
+    </section>
+
+    <section class="panel">
+        <div class="legend">
+            <span><i style="background: var(--spring)"></i>Spring</span>
+            <span><i style="background: var(--fit)"></i>Fitted spline</span>
+            <span><i style="background: var(--knot); height: 7px; width: 7px; border-radius: 50%"></i>Spline points</span>
+        </div>
+        <svg id="curves" viewBox="0 0 1000 420"></svg>
+    </section>
+
+    <section class="panel">
+        <div class="legend">
+            <span><i style="background: var(--fit)"></i>Resolved keyframes − spring</span>
+            <span><i style="background: var(--band); height: 10px"></i>± progressPrecision</span>
+        </div>
+        <svg id="errors" viewBox="0 0 1000 220"></svg>
+    </section>
+
+    <p class="error hidden" id="failure"></p>
+</main>
+<script type="module" src="./main.ts"></script>
+</body>
+</html>

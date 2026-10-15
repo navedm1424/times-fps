@@ -1,59 +1,62 @@
-
 import type {
     At,
-    MultiTweenAnimationEntry,
+    TimedTweenAnimationEntry,
     NestedSequenceEntry, RepeatOptions, Seconds,
     SequenceEntries,
     SequenceEntry,
     SimpleAnimationEntry
 } from "./types.js";
-import type {MultiTweenAnimation, SimpleAnimation} from "./animation.js";
+import type {SimpleAnimation, TimedTweenAnimation} from "./animation.js";
 
 export class SequenceBuilder<SE extends SequenceEntries = {}> {
-    private readonly entries: SequenceEntries = {};
+    private readonly names: string[] = [];
+    private readonly entries: { [name: string]: SequenceEntry } = {};
 
     add<N extends string>(
         name: N,
         animation: SimpleAnimation,
-        at?: SimpleAnimationEntry<keyof SE & string>["at"]
+        at?: At<keyof SE & string>
     ): SequenceBuilder<SE & { [_ in N]: SimpleAnimationEntry<keyof SE & string> }>;
 
-    add<N extends string, A extends MultiTweenAnimation<string[]>>(
+    add<N extends string, A extends TimedTweenAnimation<string[]>>(
         name: N,
         animation: A,
-        at?: MultiTweenAnimationEntry<A, keyof SE & string>["at"]
-    ): SequenceBuilder<SE & { [_ in N]: MultiTweenAnimationEntry<A, keyof SE & string> }>;
+        at?: At<keyof SE & string>
+    ): SequenceBuilder<SE & { [_ in N]: TimedTweenAnimationEntry<A, keyof SE & string> }>;
 
     add<N extends string, NS extends Sequence>(
         name: N,
         sequence: NS,
-        at?: NestedSequenceEntry<NS, keyof SE & string>["at"]
+        at?: At<keyof SE & string>
     ): SequenceBuilder<SE & { [_ in N]: NestedSequenceEntry<NS, keyof SE & string>; }>;
 
-    add(
-        name: string,
-        definition: SimpleAnimation | MultiTweenAnimation<string[]> | Sequence,
+    add<N extends string>(
+        name: N,
+        definition: SimpleAnimation | TimedTweenAnimation<string[]> | Sequence,
         at?: At<string>
-    ): SequenceBuilder<SequenceEntries> {
-        if (Object.hasOwn(this.entries, name)) {
+    ): SequenceBuilder<SE & { [_ in N]: SequenceEntry }> {
+        if (Object.hasOwn(this.entries, name))
             throw new Error(`An entry named "${name}" already exists in this sequence.`);
-        }
+        if (/\W/.test(name))
+            throw new Error(`The entry name "${name}" can only contain letters, digits and underscores.`);
+
+        this.names.push(name);
         const placement = {...(at !== undefined && {at})};
-        if (definition instanceof Sequence) {
+        if (definition instanceof Sequence)
             this.entries[name] = {sequence: definition, ...placement};
-        } else if (definition.type === 'simple') {
+        else if (definition.type === 'simple')
             this.entries[name] = {animation: definition, ...placement};
-        } else {
+        else
             this.entries[name] = {animation: definition, ...placement};
-        }
+
         return this;
     }
 
     build(options: SequenceOptions = {}): Sequence<{ [K in keyof SE]: SE[K] }> {
-        if (options.repeatCount === Infinity && Object.values(this.entries).some(repeatsInfinitely)) {
+        if (options.repeatCount === Infinity && Object.values(this.entries).some(repeatsInfinitely))
             throw new RangeError("A sequence containing an infinitely repeating entry can't repeat infinitely.");
-        }
-        return new Sequence({...this.entries} as { [K in keyof SE]: SE[K] }, options);
+
+        return new Sequence(this.names, this.entries as { [K in keyof SE]: SE[K] }, options);
     }
 }
 
@@ -66,8 +69,12 @@ export interface SequenceOptions extends RepeatOptions {
     delay?: Seconds;
 }
 
-export class Sequence<SE extends SequenceEntries = {}> {
-    constructor(readonly entries: SE, readonly options: SequenceOptions = {}) {}
+export class Sequence<SE extends SequenceEntries = SequenceEntries> {
+    constructor(
+        readonly names: readonly (keyof SE)[],
+        readonly entries: SE,
+        readonly options: SequenceOptions = {}
+    ) {}
 
     static builder(): SequenceBuilder {
         return new SequenceBuilder();

@@ -1,8 +1,8 @@
-import type {MultiTweenAnimation, SimpleAnimation} from "./animation.js";
+import {SimpleAnimation, TimedTweenAnimation} from "./animation.js";
 import type {Sequence} from "./sequence.js";
 
 export type Seconds = number;
-export type Ratio = number;     // share of the animation's duration, 0–1
+// export type Ratio = number;     // share of the animation's duration, 0–1
 export type Progress = number;  // position on the 0→1 change axis
 
 type AtOperator = '+' | '-' | '>+' | '>-';
@@ -20,7 +20,7 @@ export interface SimpleAnimationEntry<N extends string = string> {
     at?: At<N>;
 }
 
-export interface MultiTweenAnimationEntry<A extends MultiTweenAnimation<string[]> = MultiTweenAnimation<string[]>, N extends string = string> {
+export interface TimedTweenAnimationEntry<A extends TimedTweenAnimation<string[]> = TimedTweenAnimation<string[]>, N extends string = string> {
     animation: A;
     at?: At<N>;
 }
@@ -30,10 +30,10 @@ export interface NestedSequenceEntry<NS extends Sequence = Sequence, N extends s
     at?: At<N>;
 }
 
-export type SequenceEntry = SimpleAnimationEntry | MultiTweenAnimationEntry | NestedSequenceEntry;
+export type SequenceEntry = SimpleAnimationEntry | TimedTweenAnimationEntry | NestedSequenceEntry;
 
 export type SequenceEntries = {
-    [name: string]: SequenceEntry;
+    readonly [name: string]: SequenceEntry;
 };
 
 export type RepeatMode = 'loop' | 'reverse' | 'mirror';

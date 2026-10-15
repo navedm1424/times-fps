@@ -1,10 +1,10 @@
 // ── Adaptation ─────────────────────────────────────────────
 
 import type {
-    Animation, MultiTweenAnimation,
-    MultiTweenAnimationEntry,
+    Animation, TimedTweenAnimation,
+    TimedTweenAnimationEntry,
     Sequence,
-    NestedSequenceEntry, SimpleAnimation
+    NestedSequenceEntry, SimpleAnimation, Progress
 } from "../new-implementation/index.js";
 
 type Target = unknown;
@@ -14,7 +14,7 @@ type Value = unknown;
 //     values: readonly Value[];
 //     offsets?: readonly Progress[];
 // }
-// type Keyframes = {
+// type PropertyValueKeyframes = {
 //     [property: string]: readonly Value[] | PropertyKeyframes;
 // };
 
@@ -29,21 +29,21 @@ interface SingleTweenMapping {
     // keyframes: Keyframes;
 }
 
-interface MultiTweenMapping<TweenName extends string> {
+interface TimedTweenMapping<TweenName extends string> {
     target: Target;
     from: PropertyValues;
     to: { [N in TweenName]: PropertyValues };  // values continue from the previous tween's end
 }
 
 type AnimationMappingOf<A extends Animation> =
-    A extends MultiTweenAnimation<infer TweenNames>
-        ? MultiTweenMapping<TweenNames[number]>
+    A extends TimedTweenAnimation<infer TweenNames>
+        ? TimedTweenMapping<TweenNames[number]>
         : SingleTweenMapping;
 
 type SequenceMappingOf<S extends Sequence> = {
     [Name in keyof S["entries"]]: S["entries"][Name] extends NestedSequenceEntry<infer Nested>
         ? SequenceMappingOf<Nested>
-        : S["entries"][Name] extends MultiTweenAnimationEntry<infer A>
+        : S["entries"][Name] extends TimedTweenAnimationEntry<infer A>
             ? AnimationMappingOf<A>
             : AnimationMappingOf<SimpleAnimation>;
 };

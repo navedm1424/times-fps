@@ -1,7 +1,7 @@
-import type {MultiTweenAnimation, RatioTween, SimpleAnimation, TimedTween} from "./animation.js";
-import type {PhysicalSpringTransition, Transition} from "./transition.js";
+import type {SimpleAnimation, TimedTween, TimedTweenAnimation} from "./animation.js";
+import type {PhysicalSpringTransition, Transition, VisualSpringTransition} from "./transition.js";
 import type {Sequence} from "./sequence.js";
-import type {At, Ratio, RepeatOptions, Seconds, SequenceEntries, Stagger} from "./types.js";
+import type {At, RepeatOptions, Seconds, SequenceEntries, Stagger} from "./types.js";
 
 interface RepeatedTiming {
     iterationDuration: Seconds;
@@ -31,19 +31,19 @@ export interface TweenSpan {
     end: Seconds;
 }
 
-export interface RatioTweenSpan {
-    start: Ratio;
-    end: Ratio;
-}
+// export interface RatioTweenSpan {
+//     start: Ratio;
+//     end: Ratio;
+// }
 
-declare function physicalSpringDuration(spring: PhysicalSpringTransition): Seconds;
+declare function springRestDuration(spring: PhysicalSpringTransition | VisualSpringTransition): Seconds;
 
 export function transitionDuration(transition: Transition): Seconds {
-    return 'duration' in transition ? transition.duration : physicalSpringDuration(transition);
+    return 'duration' in transition ? transition.duration : springRestDuration(transition);
 }
 
-export function animationTiming(animation: SimpleAnimation | MultiTweenAnimation<string[]>, targetCount: number): AnimationTiming {
-    const iterationDuration = animation.type === 'tween-timed'
+export function animationTiming(animation: SimpleAnimation | TimedTweenAnimation<string[]>, targetCount: number): AnimationTiming {
+    const iterationDuration = animation.type === 'timed-tween'
         ? timedTweenSpans(animation.tweens).at(-1)?.end ?? 0
         : transitionDuration(animation.transition);
     const delays = targetDelays(targetCount, animation.options.delay);
@@ -82,20 +82,20 @@ export function timedTweenSpans(tweens: readonly TimedTween[]): TweenSpan[] {
     });
 }
 
-export function ratioTweenSpans(tweens: readonly RatioTween[]): RatioTweenSpan[] {
-    const givenRatioTotal = tweens.reduce((total, tween) => total + (tween.ratio ?? 0), 0);
-    const unratioedTweenCount = tweens.filter(tween => tween.ratio === undefined).length;
-    const normalizingDivisor = Math.max(givenRatioTotal, 1);
-    const sharedRatio = unratioedTweenCount ? Math.max(1 - givenRatioTotal, 0) / unratioedTweenCount : 0;
-
-    let previousEnd = 0;
-    return tweens.map(tween => {
-        const start = previousEnd;
-        const end = start + (tween.ratio ?? sharedRatio) / normalizingDivisor;
-        previousEnd = end;
-        return {start, end};
-    });
-}
+// export function ratioTweenSpans(tweens: readonly RatioTween[]): RatioTweenSpan[] {
+//     const givenRatioTotal = tweens.reduce((total, tween) => total + (tween.ratio ?? 0), 0);
+//     const unratioedTweenCount = tweens.filter(tween => tween.ratio === undefined).length;
+//     const normalizingDivisor = Math.max(givenRatioTotal, 1);
+//     const sharedRatio = unratioedTweenCount ? Math.max(1 - givenRatioTotal, 0) / unratioedTweenCount : 0;
+//
+//     let previousEnd = 0;
+//     return tweens.map(tween => {
+//         const start = previousEnd;
+//         const end = start + (tween.ratio ?? sharedRatio) / normalizingDivisor;
+//         previousEnd = end;
+//         return {start, end};
+//     });
+// }
 
 function resolvePosition(
     at: At<string>,
