@@ -1,6 +1,6 @@
 
 import type {Easing} from "./easing.js";
-import type {At, Progress, Seconds, Stagger} from "./types.js";
+import type {At, Progress, RepeatOptions, Seconds, Stagger} from "./types.js";
 
 declare function ease(easing: Easing, progress: Progress): Progress;
 
@@ -47,6 +47,28 @@ export function parseAt<N extends string>(at: At<N>): ParsedAt<N> {
         anchor: startMarker ? 'start' : 'referenceableEnd',
         offset: sign === '-' ? -amount : amount
     };
+}
+
+/** Throws for NaN, and for an infinite number unless `allowInfinity` is set; otherwise gives the value back. */
+export function checkNumber<Value extends number | undefined>(value: Value, label: string, {allowInfinity = false} = {}): Value {
+    if (value !== undefined && (Number.isNaN(value) || (!allowInfinity && !Number.isFinite(value))))
+        throw new RangeError(`${label} must be ${allowInfinity ? "a number" : "a finite number"}.`);
+    return value;
+}
+
+/** Negative repeat counts and delays become 0, and fractional counts round down. */
+export function clampedRepeats<Options extends RepeatOptions>(options: Options): Options {
+    const {repeatCount, repeatDelay} = options;
+    return {
+        ...options,
+        ...(repeatCount !== undefined && {repeatCount: Math.max(0, Math.floor(repeatCount))}),
+        ...(repeatDelay !== undefined && {repeatDelay: Math.max(0, repeatDelay)})
+    };
+}
+
+/** A negative delay becomes 0. */
+export function clampedDelay<Options extends { delay?: Seconds | Stagger }>(options: Options): Options {
+    return typeof options.delay === 'number' ? {...options, delay: Math.max(0, options.delay)} : options;
 }
 
 /** Exact at both ends: `from` at 0 and `to` at 1. */

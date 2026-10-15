@@ -2,7 +2,7 @@ import type {Progress} from "../types.js";
 import {remap, sortedByKey} from "../utils.js";
 import type {SimpleAnimationMapping} from "./resolver.js";
 
-export type ValueStops = {
+export type RawValueStops = {
     [progress: number]: number;
 };
 
@@ -38,7 +38,7 @@ export class PropertyValues {
 export class PropertyStops {
     private constructor(readonly stops: readonly ValueStop[]) {}
 
-    static of(property: string, valueStops: ValueStops): PropertyStops {
+    static of(property: string, valueStops: RawValueStops): PropertyStops {
         const stops = sortedByKey(valueStops).map(([progress, value]) => ({progress, value}));
         const first = stops[0];
         const last = stops.at(-1);

@@ -28,7 +28,7 @@ export function resolveTransition(transition: Transition): {
 
 /** The transition's easing laid out over one play, as segments of the spline or a single segment. */
 export class TransitionCurve {
-    private constructor(readonly segments: readonly CurveSegment[]) {}
+    private constructor(readonly segments: readonly TransitionCurveSegment[]) {}
 
     /** The easing of a curve that is a single segment from (0, 0) to (1, 1); a spline of several has none. */
     get singleEasing(): ResolvedEasing | undefined {
@@ -40,7 +40,7 @@ export class TransitionCurve {
     }
 
     static eased(easing: ResolvedEasing): TransitionCurve {
-        return new TransitionCurve([new CurveSegment({startOffset: 0, endOffset: 1, startProgress: 0, endProgress: 1, easing})]);
+        return new TransitionCurve([new TransitionCurveSegment({startOffset: 0, endOffset: 1, startProgress: 0, endProgress: 1, easing})]);
     }
 
     static ofSpline(spline: Spline): TransitionCurve {
@@ -49,13 +49,13 @@ export class TransitionCurve {
         return new TransitionCurve(points.slice(1)
             .map(([endOffset, {progress: endProgress, easing = linear}], index) => {
                 const [startOffset, {progress: startProgress}] = points[index]!;
-                return new CurveSegment({startOffset, endOffset, startProgress, endProgress, easing});
+                return new TransitionCurveSegment({startOffset, endOffset, startProgress, endProgress, easing});
             })
         );
     }
 }
 
-export class CurveSegment {
+export class TransitionCurveSegment {
     readonly startOffset: number;
     readonly endOffset: number;
     readonly startProgress: Progress;
@@ -85,11 +85,11 @@ export class CurveSegment {
     }
 
     /** Splits wherever the easing turns back, so each piece's progress only rises or only falls. */
-    splitAtTurningPoints(): CurveSegment[] {
+    splitAtTurningPoints(): TransitionCurveSegment[] {
         const pieces = this.easing.splitAt([...this.easing.turningOffsets(), 1]);
         return pieces.map(({offset, progress, easing}, index) => {
             const start = pieces[index - 1] ?? {offset: 0, progress: 0};
-            return new CurveSegment({
+            return new TransitionCurveSegment({
                 startOffset: this.scaleToOffsetRange(start.offset),
                 endOffset: this.scaleToOffsetRange(offset),
                 startProgress: this.scaleToProgressRange(start.progress),

@@ -1,6 +1,6 @@
 import {lerp} from "../utils.js";
 import {linear, type ResolvedEasing} from "./easing.js";
-import type {CurveSegment, TransitionCurve} from "./transition-curve.js";
+import type {TransitionCurveSegment, TransitionCurve} from "./transition-curve.js";
 import type {PropertyStops, PropertyValues} from "./stops.js";
 
 export class AnimationKeyframesResolver {
@@ -17,7 +17,7 @@ export class AnimationKeyframesResolver {
     }
 
     /** Splits the segment's easing wherever it passes a stop, so each piece eases between two values. */
-    private static splitSegmentIntoKeyframes(segment: CurveSegment, stops: PropertyStops): ResolvedAnimationKeyframe[] {
+    private static splitSegmentIntoKeyframes(segment: TransitionCurveSegment, stops: PropertyStops): ResolvedAnimationKeyframe[] {
         const normalizedProgresses = stops
             .stopsBetween(segment.startProgress, segment.endProgress)
             .map(({progress}) => segment.normalizeProgress(progress))
@@ -52,6 +52,16 @@ class ResolvedAnimationKeyframe {
     }
 }
 
+type DynamicDelay = number | number[] | ((index: number, total: number) => number);
+function resolveDelay(delay: DynamicDelay, index: number, total: number) {
+    return (
+        typeof delay === "function" ?
+            delay(index, total) :
+            typeof delay === "number" ?
+                delay : delay[index]
+    ) ?? 0;
+}
+
 export class ResolvedAnimation {
     constructor(readonly keyframesByProperty: { [property: string]: ResolvedAnimationKeyframe[] }) {}
 
@@ -64,12 +74,15 @@ export class ResolvedAnimation {
 
     /**
      * Lays the animations out one after another, each counting as one play.
-     * `delayBefore` gives the delay before the animation at the index, as a fraction of a play; a number delays every animation.
+     * `delayAfter` gives the delays after the animation at the index, as fractions of a play; a number delays every animation.
      */
-    static merge(animations: readonly ResolvedAnimation[], delayBefore: number | ((index: number) => number) = 0): ResolvedAnimation {
+    static merge(
+        animations: readonly ResolvedAnimation[],
+        delayAfter: DynamicDelay = 0
+    ): ResolvedAnimation {
         const padded = animations.map((animation, index) => {
-            const delay = typeof delayBefore === 'number' ? delayBefore : delayBefore(index);
-            return {animation: animation.padStart(delay), length: delay + 1};
+            const after = resolveDelay(delayAfter, index, animations.length);
+            return {animation: animation.padEnd(after), length: 1 + after};
         });
 
         const totalLength = padded.reduce((total, {length}) => total + length, 0);
@@ -104,7 +117,7 @@ export class ResolvedAnimation {
     }
 
     /** Holds the end values for `padding`, a fraction of the animation's length. */
-    private padEnd(padding: number): ResolvedAnimation {
+    padEnd(padding: number): ResolvedAnimation {
         if (padding <= 0) return this;
         return this.scaleToRange(0, 1 / (1 + padding)).mapKeyframes(keyframes => [
             ...keyframes,
