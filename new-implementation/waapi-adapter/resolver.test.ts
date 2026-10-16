@@ -16,29 +16,29 @@ const values = {
 
 describe("SimpleAnimationResolver", () => {
     it("resolves a linear transition", () => {
-        new SimpleAnimationResolver(Animation.of(eased(0.4)), {target, values}).resolve();
+        new SimpleAnimationResolver(0, Animation.of(eased(0.4)), {target, values}).resolve();
     });
 
     it("resolves a preset easing", () => {
-        new SimpleAnimationResolver(Animation.of(eased(0.4, 'easeOut')), {target, values}).resolve();
+        new SimpleAnimationResolver(0, Animation.of(eased(0.4, 'easeOut')), {target, values}).resolve();
     });
 
     it("resolves a steps easing", () => {
-        new SimpleAnimationResolver(Animation.of(eased(0.4, [4, 'jumpStart'])), {target, values}).resolve();
+        new SimpleAnimationResolver(0, Animation.of(eased(0.4, [4, 'jumpStart'])), {target, values}).resolve();
     });
 
     it("resolves a perceptual spring", () => {
-        new SimpleAnimationResolver(Animation.of(spring({duration: 0.5, bounce: 0.3})), {target, values}).resolve();
+        new SimpleAnimationResolver(0, Animation.of(spring({duration: 0.5, bounce: 0.3})), {target, values}).resolve();
     });
 
     it("resolves a physical spring", () => {
-        new SimpleAnimationResolver(Animation.of(spring({stiffness: 260, damping: 22})), {target, values}).resolve();
+        new SimpleAnimationResolver(0, Animation.of(spring({stiffness: 260, damping: 22})), {target, values}).resolve();
     });
 
     for (const repeatMode of ['loop', 'mirror', 'reverse'] as const) {
         it(`resolves a ${repeatMode} repeat with a repeat delay`, () => {
             const animation = Animation.of(eased(0.4, 'easeInOut'), {repeatCount: 3, repeatDelay: 0.2, repeatMode});
-            const effects = new SimpleAnimationResolver(animation, {target, values}).resolve();
+            const effects = new SimpleAnimationResolver(0, animation, {target, values}).resolve();
             console.log(effects);
         });
     }
@@ -47,7 +47,7 @@ describe("SimpleAnimationResolver", () => {
 const line = {x: {0: 0, 1: 1}};
 
 function effectsOf(animation: SimpleAnimation, values: SimpleAnimationMapping['values'] = line): ResolvedAnimationEffect[] {
-    return new SimpleAnimationResolver(animation, {target, values}).resolve().get(target)!;
+    return new SimpleAnimationResolver(0, animation, {target, values}).resolve().get(target)!;
 }
 
 function timingOf({delay, duration, iterations, direction, fill}: ResolvedAnimationEffect) {
@@ -147,7 +147,7 @@ describe("SimpleAnimationResolver layouts", () => {
     });
 
     it("resolves nothing for a play without duration", () => {
-        expect(new SimpleAnimationResolver(Animation.of(eased(0)), {target, values: line}).resolve().size).toBe(0);
+        expect(new SimpleAnimationResolver(0, Animation.of(eased(0)), {target, values: line}).resolve().size).toBe(0);
     });
 });
 
@@ -156,18 +156,18 @@ describe("SimpleAnimationResolver delays", () => {
 
     it("adds each target's staggered delay to its effects", () => {
         const animation = Animation.of(eased(1), {repeatCount: 2, repeatDelay: 0.5, repeatMode: 'loop', delay: index => index * 0.25});
-        const effects = new SimpleAnimationResolver(animation, {target: targets, values: line}).resolve();
+        const effects = new SimpleAnimationResolver(0, animation, {target: targets, values: line}).resolve();
         expect(targets.map(element => effects.get(element)!.map(({delay}) => delay))).toEqual([[0, 3], [0.25, 3.25], [0.5, 3.5]]);
     });
 
     it("clamps negative staggered delays to 0", () => {
         const animation = Animation.of(eased(1), {delay: index => index - 1});
-        expect(new SimpleAnimationResolver(animation, {target: targets, values: line}).targetDelays).toEqual([0, 0, 1]);
+        expect(new SimpleAnimationResolver(0, animation, {target: targets, values: line}).targetDelays).toEqual([0, 0, 1]);
     });
 
     it("rejects staggered delays that aren't finite", () => {
         const animation = Animation.of(eased(1), {delay: () => NaN});
-        expect(() => new SimpleAnimationResolver(animation, {target: targets, values: line})).toThrow(RangeError);
+        expect(() => new SimpleAnimationResolver(0, animation, {target: targets, values: line})).toThrow(RangeError);
     });
 });
 

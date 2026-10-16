@@ -76,7 +76,7 @@ export interface SequenceOptions extends RepeatOptions {
 
 export class Sequence<SE extends SequenceEntries = SequenceEntries> {
     constructor(
-        readonly names: readonly (keyof SE)[],
+        readonly names: readonly string[],
         readonly entries: SE,
         readonly options: SequenceOptions = {}
     ) {}

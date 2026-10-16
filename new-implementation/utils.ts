@@ -29,9 +29,12 @@ function originIndex(from: 'first' | 'last' | 'center' | number, total: number):
     }
 }
 
+/** Sequence-local times an entry's position can refer to. */
+export type EntryReferences = { start: Seconds; end: Seconds };
+
 export type ParsedAt<N extends string> =
     | { kind: 'absolute'; time: Seconds }
-    | { kind: 'relative'; reference: N | undefined; anchor: 'start' | 'referenceableEnd'; offset: Seconds };
+    | { kind: 'relative'; reference: N | undefined; anchor: keyof EntryReferences; offset: Seconds };
 
 export function parseAt<N extends string>(at: At<N>): ParsedAt<N> {
     if (typeof at === 'number') return {kind: 'absolute', time: at};
@@ -44,7 +47,7 @@ export function parseAt<N extends string>(at: At<N>): ParsedAt<N> {
     return {
         kind: 'relative',
         reference: reference ? reference as N : undefined,
-        anchor: startMarker ? 'start' : 'referenceableEnd',
+        anchor: startMarker ? 'start' : 'end',
         offset: sign === '-' ? -amount : amount
     };
 }
