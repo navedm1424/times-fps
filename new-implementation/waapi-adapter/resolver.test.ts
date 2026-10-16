@@ -3,8 +3,8 @@ import {Animation, type AnimationOptions, type SimpleAnimation} from "../animati
 import {eased, spring, type Transition} from "../transition.js";
 import {invLerp, lerp} from "../utils.js";
 import {CubicBezierEasing, StepsEasing, type ResolvedEasing} from "./easing.js";
-import {ResolvedAnimation} from "./resolved-animation.js";
-import {type ResolvedAnimationEffect, type SimpleAnimationMapping, SimpleAnimationResolver} from "./resolver.js";
+import {AnimationKeyframesResolver, ResolvedAnimationEffect} from "./animation-effects.js";
+import {type SimpleAnimationMapping, SimpleAnimationResolver} from "./resolver.js";
 import {PropertyValues} from "./stops.js";
 import {resolveTransition} from "./transition-curve.js";
 
@@ -55,7 +55,7 @@ function timingOf({delay, duration, iterations, direction, fill}: ResolvedAnimat
 }
 
 function keyframesOf(effect: ResolvedAnimationEffect): number[][] {
-    return effect.animation.keyframesByProperty.x!.map(({offset, value}) => [offset, value]);
+    return effect.animation.x!.map(({offset, value}) => [offset, value]);
 }
 
 function closeTo(rows: number[][]) {
@@ -77,7 +77,7 @@ function ease(easing: ResolvedEasing | undefined, x: number): number {
 /** The property's value at `x` through one iteration of the effect, as a browser computes it. */
 function valueAt(effect: Pick<ResolvedAnimationEffect, 'animation' | 'easing'>, property: string, x: number): number {
     const progress = ease(effect.easing, x);
-    const keyframes = effect.animation.keyframesByProperty[property]!;
+    const keyframes = effect.animation[property]!;
     const nextIndex = keyframes.findIndex(keyframe => keyframe.offset >= progress);
     const index = nextIndex === -1 ? keyframes.length - 1 : Math.max(1, nextIndex);
     const from = keyframes[index - 1]!;
@@ -181,10 +181,8 @@ describe("SimpleAnimationResolver final play", () => {
     /** The final play's keyframes against the stops eased as a whole, which is what the play means. */
     function largestDeviation(transition: Transition, options: AnimationOptions): number {
         const finalPlay = effectsOf(Animation.of(transition, options), values).at(-1)!;
-        const reference = {
-            animation: ResolvedAnimation.ofStops(PropertyValues.of(values)),
-            easing: resolveTransition(transition).curve.singleEasing!
-        };
+        const referenceKeyframes = new AnimationKeyframesResolver(PropertyValues.of(values), resolveTransition(transition).curve);
+        const reference = {animation: referenceKeyframes.resolve(), easing: referenceKeyframes.effectEasing};
         let largest = 0;
         for (const property of Object.keys(values))
             for (let step = 0; step <= 1000; step++)
@@ -198,7 +196,7 @@ describe("SimpleAnimationResolver final play", () => {
             expect(largestDeviation(eased(1, [0.3, 1.6, 0.6, 1]), options)).toBeLessThan(1e-9);
         });
 
-        it.fails(`follows a steps easing after a ${repeatMode} repeat, once steps split through a window`, () => {
+        it(`follows a steps easing after a ${repeatMode} repeat`, () => {
             expect(largestDeviation(eased(1, [4, 'jumpStart']), options)).toBeLessThan(1e-9);
         });
     }
