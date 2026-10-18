@@ -5,7 +5,7 @@ import {spring, type SpringTransition} from "timesfps";
 import {PlayIcon} from "@/components/icons/play-icon";
 import {ChipTray} from "@/components/tray/chip-tray";
 import {TrayIconButton} from "@/components/tray/tray-icon-button";
-import {type BallId, playToEnd, returnToStart} from "./ball-players";
+import {type BallId, nextFrameTime, playToEnd, returnToStart} from "./ball-players";
 
 const balls: { id: BallId; title: string; method: string }[] = [
     {id: "css", title: "CSS", method: "uses linear()"},
@@ -15,7 +15,7 @@ const balls: { id: BallId; title: string; method: string }[] = [
 
 /** Brings the balls back to the start, a moment after the last of them reaches the end. */
 const returnSpring = spring({visualDuration: 0.35, bounce: 0});
-const returnDelayInMilliseconds = 250;
+const returnDelayInMilliseconds = 1000;
 
 export function BallRace({transition}: { transition: SpringTransition }) {
     const [playing, setPlaying] = useState(false);
@@ -25,7 +25,8 @@ export function BallRace({transition}: { transition: SpringTransition }) {
     async function play(ids: readonly BallId[]) {
         const playedBalls = ids.map(id => ({id, ball: ballElements.current[id]!}));
         setPlaying(true);
-        await Promise.all(playedBalls.map(({id, ball}) => playToEnd(id, ball, transition)));
+        const startTime = await nextFrameTime();
+        await Promise.all(playedBalls.map(({id, ball}) => playToEnd(id, ball, transition, startTime)));
         await new Promise(resolve => setTimeout(resolve, returnDelayInMilliseconds));
         await returnToStart(playedBalls.map(({ball}) => ball), returnSpring);
         setPlaying(false);
