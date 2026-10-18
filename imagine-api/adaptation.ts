@@ -5,7 +5,7 @@ import type {
     TimedTweenAnimationEntry,
     Sequence,
     NestedSequenceEntry, SimpleAnimation, Progress
-} from "../new-implementation/index.js";
+} from "../src/index.js";
 
 type Target = unknown;
 type Value = unknown;

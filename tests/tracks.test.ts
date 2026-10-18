@@ -1,15 +1,15 @@
 import {describe, expect, it} from "vitest";
-import {AnimationDefinition, type AnimationOptions, type SimpleAnimation} from "../animation.js";
-import {CubicBezierEasing, type EasingFunction, linear, StepsEasing} from "../easing.js";
-import {Sequence} from "../sequence.js";
-import {eased, spring, type Transition} from "../transition.js";
-import type {RepeatOptions} from "../types.js";
-import {lerp} from "../utils.js";
-import type {NativeAnimationEffect, NativeKeyframe} from "./native-effects.js";
-import {cssEasingOf, type NativeEasing} from "./native-easing.js";
-import {PropertyStops, type RawValueStops} from "./stops.js";
-import {type EntryPath, resolveTimings} from "./timings.js";
-import {type AnimationTracks, AnimationTracksResolver, type TargetValues} from "./tracks.js";
+import {AnimationDefinition, type AnimationOptions, type SimpleAnimation} from "../src/animation.js";
+import {CubicBezierEasing, type EasingFunction, linear, StepsEasing} from "../src/easing.js";
+import {Sequence} from "../src/sequence.js";
+import {eased, spring, type Transition} from "../src/transition.js";
+import type {RepeatOptions} from "../src/types.js";
+import {lerp} from "../src/utils.js";
+import type {NativeAnimationEffect, NativeKeyframe} from "../src/waapi/native-effects.js";
+import {cssEasingOf, type NativeEasing} from "../src/waapi/native-easing.js";
+import {PropertyStops, type RawValueStops} from "../src/waapi/stops.js";
+import {type EntryPath, resolveTimings} from "../src/waapi/timings.js";
+import {type AnimationTracks, AnimationTracksResolver, type TargetValues} from "../src/waapi/tracks.js";
 
 const target = {} as Element;
 const line = {x: {0: 0, 1: 1}};

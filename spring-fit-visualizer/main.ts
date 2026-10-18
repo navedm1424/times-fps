@@ -1,14 +1,14 @@
-import {AnimationDefinition} from "../../animation.js";
-import {CubicBezierEasing, type SpringEasing} from "../../easing.js";
-import {progressPrecision, type SpringTransition} from "../../transition.js";
-import type {Seconds} from "../../types.js";
-import {invLerp, lerp} from "../../utils.js";
-import type {NativeKeyframe} from "../native-effects.js";
-import {cssEasingOf, type NativeEasing} from "../native-easing.js";
-import {SpringSplineFitter} from "../spring-fit.js";
-import {PropertyStops} from "../stops.js";
-import {resolveTimings} from "../timings.js";
-import {AnimationTracksResolver} from "../tracks.js";
+import {AnimationDefinition} from "../src/animation.js";
+import {CubicBezierEasing, type SpringEasing} from "../src/easing.js";
+import {progressPrecision, type SpringTransition} from "../src/transition.js";
+import type {Seconds} from "../src/types.js";
+import {invLerp, lerp} from "../src/utils.js";
+import type {NativeKeyframe} from "../src/waapi/native-effects.js";
+import {cssEasingOf, type NativeEasing} from "../src/waapi/native-easing.js";
+import {SpringSplineFitter} from "../src/waapi/spring-fit.js";
+import {PropertyStops} from "../src/waapi/stops.js";
+import {resolveTimings} from "../src/waapi/timings.js";
+import {AnimationTracksResolver} from "../src/waapi/tracks.js";
 
 type Kind = 'physical' | 'perceptual' | 'visual';
 

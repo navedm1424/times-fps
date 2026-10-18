@@ -1,15 +1,13 @@
 ## times-fps
 
-`times-fps` is a tiny TypeScript toolkit for designing animations and sampling animation frames with timelines, easing, and interpolation utilities.
+`times-fps` is a TypeScript library for designing animations that play natively in the browser.
 
-This library allows you to describe your animation with named phases. `times-fps` gives you:
+- **Truly fluid native springs.** Springs are fitted as cubic Béziers that follow the real motion within 0.1%, not sampled into `linear()` approximations.
+- **Yoyo and mirror repeats.** Every other play runs backwards (`reverse`), or swaps its values while its easing keeps running forwards (`mirror`).
+- **Repeat delays,** on animations and sequences alike.
+- **Compounding nested repeats.** Sequences nest, and an animation repeating inside a repeating sequence plays all of its repeats in every iteration of the sequence.
 
-- a `Timeline` you can use to define animation phases
-- an `Interpolator` you can use to interpolate between values mapping normalized progress and animation segments to ranges
-- a `FrameSampler` that generates frames for an FPS and duration
-- a `TimelineInspector` you can use to ask "has this phase started/finished yet?"
-
-`FrameSampler` can produce frame values in the form of numbers, strings, arrays, or nested objects.
+It's built on the Web Animations API. You describe an animation once and map it onto elements and CSS values, and it runs as native animations, with no JavaScript per frame.
 
 <br/><br/>
 
@@ -27,361 +25,251 @@ The library is written in TypeScript, ships as an ES module, and includes type d
 
 <br/><br/>
 
-## Features
-
-### Timeline Phases
-
-Build timelines from named phases and ratios instead of hard‑coded numeric intervals.
+## Quick Start
 
 ```ts
-import {Timeline} from "times-fps";
+import {AnimationDefinition, eased, WAAPIAdapter} from "times-fps";
 
-const timeline = Timeline.ofPhases(
-    ["intro", 1],   // 1 unit of time
-    ["main",  2],   // 2 units of time
-    ["outro", 1]    // 1 unit of time
-);
+const fadeIn = AnimationDefinition.of(eased(0.4, 'easeOut'));
 
-// Each phase is a Segment with [start, end] in [0, 1]
-const phases = timeline.phases;
-// phases.intro.start === 0
-// phases.main.end   === 0.75
-// phases.outro.end  === 1
-```
-
-Under the hood, `Timeline` builds a `Sequence` of `Segment`s and scales them to the normal \[0, 1\] interval.
-
----
-
-### Interpolator & Segment Mapping
-
-Turn a normalized progress value into numbers and ranges that respect your timeline structure.
-
-```ts
-import {createFrameSampler, getInterpolator, Timeline} from "times-fps";
-
-const tl = Timeline.ofPhases(
-    ["intro", 1],
-    ["main", 2],
-    ["outro", 1]
-);
-const p = tl.phases;
-
-const sampler = createFrameSampler(progress => {
-    const map = getInterpolator(progress);
-
-    // Map the "intro" phase to a radius range
-    const introRadius = map(p.intro).to(0, 50);
-
-    // Map the "main" phase to an opacity range
-    const mainOpacity = map(p.main).to(0, 1);
-
-    // Map the whole sequence to anchor values
-    const x = map.sequence(tl.sequence).to(0, 100, 200, 300);
-    // end-inclusive slicing
-    const y = map.sequence(tl.sequence.subsequence("main", "outro")).to(0, 100, 200);
-
-    return {introRadius, mainOpacity, x, y};
-});
-```
-
-- **`segment(segment).to(start, end)`**: remap the current progress within a specific segment to a numeric range.
-- **`segment(segment).withEasing(easing).to(start, end)`**: apply custom easing inside that segment.
-- **`sequence(sequence).to(...anchors)`**: map the full sequence or a subsequence to a list of anchor values, one more than the number of segments.
-
----
-
-### Easing & Cubic Bézier Curves
-
-Use built‑in easing functions or create custom cubic‑Bézier easings for your frames.
-
-```ts
-import {cubicBezierEasing, easeIn, easeOut, easeInOut} from "times-fps";
-
-const customEase = cubicBezierEasing(0.55, 0.085, 0.68, 0.53);
-
-// All easing functions are (t: number) => number
-customEase(0.5); // eased value in [0, 1]
-easeIn(0.3);
-easeOut(0.8);
-easeInOut(0.4);
-```
-
-Easing functions can be plugged directly into the `FrameSampler` (to ease global progress) or into the `Interpolator` when mapping particular segments.
-
----
-
-### Frame Sampling
-
-Sample your animation at a fixed frames‑per‑second and get back structured frame data.
-
-```ts
-import {createFrameSampler, type Frame} from "times-fps";
-
-type MyValue = {
-    x: number;
-    y: number;
-    opacity: number;
-}
-
-const sampler = createFrameSampler<MyValue>(progress => {
-    const t = progress.value; // normalized 0 → 1
-
-    return {
-        x: t * 100,
-        y: t * 50,
-        opacity: t
-    };
-});
-
-// Lazily iterate frames
-for (const frame of sampler.iterate({duration: 2, fps: 60})) {
-    // frame: { progress: number; value: MyValue }
-}
-
-// Or eagerly collect them
-const data = sampler.collect({duration: 2, fps: 60});
-// data.duration === 2
-// data.fps      === 60
-// data.frames   === Frame<MyValue>[]
-```
-
-`FrameSampler` works with nested data: numbers, strings, arrays, and objects, so you can shape the frame values as you like.
-
----
-
-### Timeline Inspection
-
-Ask timeline‑related questions at any point in time: “has this phase started yet?”, “is this sequence still active?”.
-
-```ts
-import {createFrameSampler, getTimelineInspector, Timeline} from "times-fps";
-
-const timeline = Timeline.ofPhases(
-    ["intro", 1],
-    ["main",  2],
-    ["outro", 1]
-);
-
-const sampler = createFrameSampler(progress => {
-    const inspect = getTimelineInspector(progress);
-    const p = timeline.phases;
-
-    const intro = inspect(p.intro);
-    const main  = inspect(p.main);
-
-    if (intro.isActive()) {
-        // do something during intro
+const adapter = new WAAPIAdapter();
+const animations = adapter.animate(fadeIn, {
+    target: '.card',
+    values: {
+        opacity: {0: 0, 1: 1},
+        scale: {0: 0.95, 1: 1}
     }
-    if (main.hasStarted()) {
-        // do something when main starts
-    }
-
-    return {};
 });
 ```
 
-`TimelineInspector` is built on top of the same normalized progress value, so it stays in sync with your frame sampling and interpolation.
-
----
-
-### Exporting Frames (Node.js)
-
-Use the `FrameExporter` helper to write frame data to disk when running in Node.js—for example, to precompute animation data for a game engine or for SVG path animations.
-
-```ts
-import {createFrameSampler, cubicBezierEasing, Timeline} from "times-fps";
-import {FrameExporter} from "times-fps/exporter";
-
-const timeline = Timeline.ofPhases(
-    ["intro", 1],
-    ["main", 2],
-    ["outro", 1]
-);
-
-const sampler = createFrameSampler(progress => {
-    return { x: progress.value * 100 };
-});
-
-await FrameExporter.exportToJson(
-    sampler.collect({
-        duration: 3,
-        fps: 120,
-        easing: cubicBezierEasing(0.55, 0.085, 0.68, 0.53)
-    }),
-    // this path should be relative to `process.cwd()`
-    "./json-exports",
-    "frames"
-);
-```
-
-> Note: `exportToJson` is implemented only for the Node.js build (`times-fps/exporter`); the browser variant throws to guard against accidental use.
-
----
-
-### WAAPI & `requestAnimationFrame`
-
-You can use `FrameSampler` with Web Animations API:
-
-```ts
-const sampler = createFrameSampler(progress => {
-    return {x: progress.value * 100};
-});
-
-const duration = 3;
-const frames = sampler.collect({
-    duration,
-    fps: 120,
-    easing: cubicBezierEasing(0.55, 0.085, 0.68, 0.53)
-});
-
-const element = document.getElementById("element-id");
-element.animate(frames, {duration: duration * 1000});
-```
-
-or `requestAnimationFrame`:
-
-```ts
-const sampler = createFrameSampler(progress => {
-    return {x: progress.value * 100};
-});
-
-const duration = 3;
-const generator = sampler.iterate({
-    duration,
-    fps: 120,
-    easing: cubicBezierEasing(0.55, 0.085, 0.68, 0.53)
-});
-
-const animate = () => {
-    const next = generator.next();
-    if (next.done)
-        return;
-
-    // use the value
-    const value = next.value;
-
-    requestAnimationFrame(animate);
-};
-requestAnimationFrame(animate);
-```
-
-You could also do:
-
-```ts
-const sampler = createFrameSampler(progress => {
-    return {x: progress.value * 100};
-});
-
-const duration = 3;
-
-let progress = 0;
-let startTime: number | undefined;
-
-const animate = (time) => {
-    if (typeof startTime === "undefined")
-        startTime = time;
-    progress = (time - startTime) / duration;
-    if (progress > 1)
-        return;
-
-    // use the value
-    const value = sampler.sampleAt(progress);
-
-    requestAnimationFrame(animate);
-};
-requestAnimationFrame(animate);
-```
+`animate` returns the native `Animation` objects it creates, so you can `pause()`, `cancel()` or await `finished` on them as usual.
 
 <br/><br/>
 
-## Example: Driving an SVG Path Animation
+## Transitions
 
-Here is a more complete, end‑to‑end example combining `times-fps` with another library I authored, [`svg-path-kit`](https://github.com/navedm1424/svg-path-kit), to precompute SVG path frames:
+A transition is how one play of an animation moves from start to end.
+
+### Eased
 
 ```ts
-import {PathBuilder, Point2D, Angle} from "svg-path-kit";
-import {
-    createFrameSampler,
-    getInterpolator,
-    Timeline,
-    cubicBezierEasing
-} from "times-fps";
-import {FrameExporter} from "times-fps/exporter";
+import {eased} from "times-fps";
 
-const timeline = Timeline.ofPhases(
-    ["arc1", 1],
-    ["arc2", 1]
-);
-const p = timeline.phases;
-
-const sampler = createFrameSampler(progress => {
-    const map = getInterpolator(progress);
-    const pb = PathBuilder.m(Point2D.ORIGIN);
-
-    const arc1Radius = map(p.arc1).to(1, 5);
-    const arc1EndAngle = map(p.arc1).to(0, 3 * Math.PI / 4);
-    pb.bezierCircularArc(arc1Radius, Angle.ZERO, arc1EndAngle);
-    pb.l(pb.currentVelocity);
-
-    const arc2Radius = map(p.arc2).to(1, 5);
-    const arc2EndAngle = map(p.arc2).to(0, -Math.PI);
-    const lineAngle = pb.currentVelocity.angle;
-    pb.bezierCircularArc(arc2Radius, Angle.of(lineAngle).halfTurnBackward(), arc2EndAngle);
-
-    return pb.toSVGPathString();
-});
-
-await FrameExporter.exportToJson(
-    sampler.collect({
-        duration: 3,
-        fps: 120,
-        easing: cubicBezierEasing(0.55, 0.085, 0.68, 0.53)
-    }),
-    "../json-exports",
-    "path-data"
-); // This will store the animation frames in a `path-data.json` file
+eased(0.4);                              // linear, 0.4 seconds
+eased(0.4, 'easeInOut');                 // 'linear' | 'ease' | 'easeIn' | 'easeOut' | 'easeInOut'
+eased(0.6, [0.3, 1.6, 0.6, 1]);          // a cubic Bézier, as in CSS cubic-bezier()
+eased(1, [4, 'jumpStart']);              // steps: 'jumpStart' | 'jumpEnd' | 'jumpNone' | 'jumpBoth'
 ```
+
+### Springs
+
+Springs come in three flavours. Each works out how long it runs.
+
+```ts
+import {spring} from "times-fps";
+
+// Perceptual: comes to rest exactly at `duration`; `bounce` 0 means no overshoot.
+spring({duration: 0.6, bounce: 0.3});
+
+// Visual: `visualDuration` sets how fast it swings; it runs on until it's at rest.
+spring({visualDuration: 0.4, bounce: 0.2});
+
+// Physical: stiffness, damping and mass, as in m·x″ = −k·x − c·x′.
+spring({stiffness: 260, damping: 22, mass: 1});
+```
+
+All three take an optional `velocity`, in progress per second. Physical springs also take `restDelta`, how close to the target counts as at rest.
+
+Springs are played as fitted cubic Bézier keyframes, within 0.1% of the true motion.
+
+<br/><br/>
+
+## Animations
+
+```ts
+import {AnimationDefinition, eased, stagger} from "times-fps";
+
+const pulse = AnimationDefinition.of(eased(0.5, 'easeInOut'), {
+    delay: 0.2,             // seconds, or a stagger
+    repeatCount: 3,         // repetitions after the first play; Infinity repeats forever
+    repeatDelay: 0.25,      // seconds between plays
+    repeatMode: 'mirror'    // 'loop' | 'reverse' | 'mirror'
+});
+```
+
+- **`loop`** starts every play from the beginning.
+- **`reverse`** plays every other play backwards in time, easing included.
+- **`mirror`** swaps the start and end values on every other play, but keeps the easing running forwards.
+
+Invalid numbers (`NaN`, or infinite times) throw. Negative delays and repeats become 0, and fractional repeat counts round down.
+
+### Staggers
+
+A stagger gives each target its own delay:
+
+```ts
+AnimationDefinition.of(eased(0.3), {
+    delay: stagger(0.05)                                   // 0, 0.05, 0.1, …
+});
+AnimationDefinition.of(eased(0.3), {
+    delay: stagger(0.05, {from: 'center', easing: 'easeOut'})
+});
+```
+
+`from` is `'first'`, `'last'`, `'center'` or an index. `easing` spreads the delays along an easing.
+
+<br/><br/>
+
+## Sequences
+
+A sequence lays named entries out in time. Entries are animations or other sequences.
+
+```ts
+import {AnimationDefinition, eased, spring, Sequence} from "times-fps";
+
+const intro = Sequence.builder()
+    .add('title', AnimationDefinition.of(spring({duration: 0.6, bounce: 0.2})))
+    .add('subtitle', AnimationDefinition.of(eased(0.4, 'easeOut')), '-0.3')
+    .add('button', AnimationDefinition.of(eased(0.3)), 'title>+0.2')
+    .build({delay: 0.1});
+```
+
+An entry's position, its third argument, can be:
+
+| Position     | Means                                                          |
+|--------------|----------------------------------------------------------------|
+| omitted      | right after the previous entry, the same as `'+0'`             |
+| `1.5`        | 1.5 seconds from the start of the sequence                     |
+| `'+0.2'`     | 0.2 seconds after the previous entry ends                      |
+| `'-0.3'`     | 0.3 seconds before the previous entry ends                     |
+| `'>+0.1'`    | 0.1 seconds after the previous entry starts (`'>-0.1'`: before) |
+| `'title+0'`  | when the entry named `title` ends                              |
+| `'title>+0'` | when the entry named `title` starts                            |
+
+An entry that repeats forever counts as ending after its first play. Names may only contain letters, digits and underscores.
+
+### Nesting and repeating
+
+Sequences nest, and take the same repeat options as animations:
+
+```ts
+const card = Sequence.builder()
+    .add('lift', AnimationDefinition.of(eased(0.3, 'easeOut')))
+    .add('glow', AnimationDefinition.of(eased(0.5)), '>+0')
+    .build({repeatCount: 2, repeatDelay: 0.5, repeatMode: 'reverse'});
+
+const page = Sequence.builder()
+    .add('intro', intro)
+    .add('card', card, '-0.2')
+    .build();
+```
+
+Repeats compound: an animation that repeats inside a sequence that repeats plays all of its own repetitions in every iteration of the sequence. The exception is an animation that repeats forever. It plays only its first iteration in each iteration of the sequence, and carries on repeating once the sequence is done.
+
+<br/><br/>
+
+## Playing with WAAPI
+
+```ts
+const adapter = new WAAPIAdapter();
+adapter.animate(definition, mapping, scope);
+```
+
+### Mappings
+
+For an animation, the mapping says which elements to animate and which values to animate them through:
+
+```ts
+adapter.animate(pulse, {
+    target: '.dot',
+    values: {
+        opacity: {0: 0.4, 0.5: 1, 1: 0.4},
+        width: {0: 10, 1: '2em'}
+    }
+});
+```
+
+For a sequence, the mapping mirrors its entries by name, nested sequences included:
+
+```ts
+adapter.animate(page, {
+    intro: {
+        title: {target: 'h1', values: {opacity: {0: 0, 1: 1}, translate: {0: '-40px', 1: '0px'}}},
+        subtitle: {target: 'h2', values: {opacity: {0: 0, 1: 1}}},
+        button: {target: '#cta', values: {scale: {0: 0.8, 1: 1}}}
+    },
+    card: {
+        lift: {target: '.card', values: {scale: {0: 1, 1: 1.05}}},
+        glow: {target: '.card', values: {'--glow': {0: '0px', 1: '24px'}}}
+    }
+});
+```
+
+### Targets
+
+A target can be:
+
+- an `Element`, or an array of them;
+- a CSS selector, looked up in the scope;
+- a function `(scope) => Element | Element[]`.
+
+The scope defaults to `document.documentElement`. A target that matches nothing throws.
+
+### Values
+
+Values are keyed by progress, from 0 to 1. Progress is how far a play has gone through its change, not through its time. A missing 0 or 1 takes the nearest value. Between keys, values change linearly with progress, and a spring that overshoots carries them past the end values.
+
+A value can be:
+
+- **a number**, which takes the property's default unit: none for properties that take numbers (`opacity`, `scale`), `px` for lengths (`width`, `translate`), `deg` for angles (`rotate`);
+- **a number with a unit**, such as `'2em'`, `'50%'` or `'0.5turn'`;
+- **any CSS expression that resolves to one number**, such as `'calc(100% - 2rem)'` or `'var(--size)'`.
+
+Values in different units are resolved against each target, so `{0: 10, 1: '2em'}` ends up in pixels for every element. If they still disagree after resolving, as with `px` and `%`, `animate` throws.
+
+Properties are written in camelCase (`backgroundPositionX`). Custom properties are written as they are (`'--glow'`), and should be given their units explicitly.
+
+Each property must take a single numeric value. For compound values, animate a custom property registered with `@property` and use it in your CSS:
+
+```css
+@property --y {
+    syntax: '<length>';
+    inherits: false;
+    initial-value: 0px;
+}
+
+.card {
+    translate: 0 var(--y);
+}
+```
+
+```ts
+adapter.animate(fadeUp, {target: '.card', values: {'--y': {0: '20px', 1: '0px'}}});
+```
+
+### Overlaps
+
+When entries animate the same property of the same element, the one declared later shows over the earlier one while it runs. An earlier entry that falls entirely within a later one is dropped. Only the entry that starts first holds its start values before it starts. An entry holds its end values after it ends, unless one declared before it is still running.
+
+<br/><br/>
+
+## Not Yet Supported
+
+- Animations made of timed tweens, `AnimationDefinition.of([...tweens])`, can be defined, but the WAAPI adapter doesn't play them yet.
+- Properties that take more than one value at once, like `transform` or a two-value `translate`. Use individual properties or a registered custom property instead.
 
 <br/><br/>
 
 ## API Overview
 
-The primary entry points you will usually work with are:
+- **Transitions**
+    - `eased(duration, easing?)`: a timed transition with a CSS easing.
+    - `spring(options)`: a perceptual, visual or physical spring.
+- **`AnimationDefinition.of(transition, options?)`**: an animation, with `delay`, `repeatCount`, `repeatDelay` and `repeatMode`.
+- **`stagger(each, {from?, easing?})`**: a per-target delay.
+- **`Sequence.builder()`**: builds a sequence.
+    - `.add(name, animationOrSequence, position?)` adds an entry.
+    - `.build(options?)` takes a `delay` and the repeat options.
+- **`new WAAPIAdapter().animate(definition, mapping, scope?)`**: plays a definition on elements and returns the native `Animation`s.
 
-- **`Timeline`**: build normalized timelines with named phases.
-    - `Timeline.ofPhases(...[name, duration][])` – create a timeline from labeled durations.
-    - `.phases` – a read‑only map of phase names to `Segment`s.
-    - `.sequence` – the underlying `Sequence` of segments (useful with the interpolator).
-
-- **`createFrameSampler`**: create a sampler around a `progress => value` function.
-    - `.sampleAt(t)` – sample a single frame at normalized time \(t\).
-    - `.iterate(options)` – lazily generate frames.
-    - `.collect(options)` – eagerly collect frames along with `duration` and `fps`.
-
-- **`getInterpolator`**: attach an `Interpolator` to a specific `AnimationProgress`.
-    - `map(segment).to(start, end)` – map progress in a segment to a numeric range.
-    - `map.segment(segment).withEasing(easing).to(start, end)` – map with easing.
-    - `map.sequence(sequence).to(...anchors)` – map a full sequence to anchor values.
-
-- **`getTimelineInspector`**: derive a `TimelineInspector` from an `AnimationProgress`.
-    - `inspect(segment).hasStarted() / hasFinished() / isActive()` – query phase/segment state.
-
-- **Easing helpers**:
-    - `cubicBezierEasing(mX1, mY1, mX2, mY2)` – create custom easing functions.
-    - `easeIn`, `easeOut`, `easeInOut` – standard easing presets.
-
-All of these are exported from the root `times-fps` entry point, except for `FrameExporter`, which is available from `times-fps/exporter`.
-
-<br/><br/>
-
-## Note from Author
-
-I needed a way to precompute and export animation frames so the browser wouldn’t have to run Javascript to compute each frame. I could then feed the precomputed, exported frames into WAAPI to get a JS-computed animation with browser-native performance. 
-
-What I ended up writing was not only a utility to precompute animations but also a way to design animations in terms of timelines and phases. You can design a complex interplay of CSS values in a single function, export the frames to JSON, and use them in your component.
-
-I'm aiming to keep this library small, focused, and composable. If you have ideas, suggestions, or corrections, the project is open‑source and I’d be very happy to hear from you.
-
-Thanks a lot!
-
+Everything is exported from the root `times-fps` entry point, along with the types of every option and mapping.

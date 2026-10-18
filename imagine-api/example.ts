@@ -4,7 +4,7 @@ import {
     eased,
     spring,
     Animation
-} from "../new-implementation/index.js";
+} from "../src/index.js";
 
 type WAAPIEffect = [keyframes: Keyframe[], options: KeyframeAnimationOptions];
 declare const waapi: Adapter<WAAPIEffect[]>;

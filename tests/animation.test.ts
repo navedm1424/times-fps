@@ -1,6 +1,6 @@
 import {describe, expect, it} from "vitest";
-import {AnimationDefinition} from "./animation.js";
-import {eased, spring} from "./transition.js";
+import {AnimationDefinition} from "../src/animation.js";
+import {eased, spring} from "../src/transition.js";
 
 describe("AnimationDefinition.of", () => {
     it("rejects time fields that aren't finite", () => {

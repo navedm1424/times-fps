@@ -1,7 +1,7 @@
 import {describe, expect, it} from "vitest";
-import {AnimationDefinition} from "./animation.js";
-import {Sequence} from "./sequence.js";
-import {eased} from "./transition.js";
+import {AnimationDefinition} from "../src/animation.js";
+import {Sequence} from "../src/sequence.js";
+import {eased} from "../src/transition.js";
 
 describe("SequenceBuilder.build", () => {
     const builder = () => Sequence.builder().add('a', AnimationDefinition.of(eased(1)));
