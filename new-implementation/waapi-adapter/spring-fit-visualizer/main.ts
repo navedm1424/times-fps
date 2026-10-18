@@ -1,11 +1,14 @@
-import {Animation} from "../../animation.js";
+import {AnimationDefinition} from "../../animation.js";
+import {CubicBezierEasing, type SpringEasing} from "../../easing.js";
 import {progressPrecision, type SpringTransition} from "../../transition.js";
 import type {Seconds} from "../../types.js";
 import {invLerp, lerp} from "../../utils.js";
-import {CubicBezier} from "../cubic-bezier.js";
-import {CubicBezierEasing} from "../easing.js";
-import {SimpleAnimationResolver} from "../resolver.js";
-import {resolveSpring, SpringSplineFitter} from "../spring-fit.js";
+import type {NativeKeyframe} from "../native-effects.js";
+import {cssEasingOf, type NativeEasing} from "../native-easing.js";
+import {SpringSplineFitter} from "../spring-fit.js";
+import {PropertyStops} from "../stops.js";
+import {resolveTimings} from "../timings.js";
+import {AnimationTracksResolver} from "../tracks.js";
 
 type Kind = 'physical' | 'perceptual' | 'visual';
 
@@ -56,14 +59,8 @@ const playButton = document.querySelector<HTMLButtonElement>('#play')!;
 const track = document.querySelector<HTMLElement>('#track')!;
 const ball = document.querySelector<HTMLElement>('#ball')!;
 
-interface ResolvedKeyframe {
-    offset: number;
-    value: number;
-    easing?: unknown;
-}
-
 /** What the ball plays: the resolved effect's keyframes, easing and duration. */
-let playableFit: { keyframes: readonly ResolvedKeyframe[]; easing: unknown; duration: Seconds } | undefined;
+let playableFit: { keyframes: readonly NativeKeyframe[]; easing: NativeEasing; duration: Seconds } | undefined;
 let ballPlayback: ReturnType<Element['animate']> | undefined;
 
 playButton.addEventListener('click', playBall);
@@ -110,13 +107,9 @@ function transitionOf(kind: Kind, values: { [name: string]: number }): SpringTra
     }
 }
 
-/** Plays the resolved keyframes back the way WAAPI would: each keyframe's easing runs from the previous keyframe. */
-function fittedProgressAt(keyframes: readonly { offset: number; value: number; easing?: unknown }[], duration: Seconds) {
-    const curves = keyframes.map(({easing}) => {
-        if (!(easing instanceof CubicBezierEasing)) return undefined;
-        const [x1, y1, x2, y2] = easing.definition;
-        return new CubicBezier({x: 0, y: 0}, {x: x1, y: y1}, {x: x2, y: y2}, {x: 1, y: 1});
-    });
+/** Plays the resolved keyframes back the way WAAPI would: each keyframe's easing runs to the next keyframe. */
+function fittedProgressAt(keyframes: readonly NativeKeyframe[], duration: Seconds) {
+    const curves = keyframes.map(({easing}) => easing?.type === 'cubic-bezier' ? new CubicBezierEasing(easing.definition) : undefined);
     return (time: Seconds): number => {
         const offset = time / duration;
         const nextIndex = keyframes.findIndex(keyframe => keyframe.offset >= offset);
@@ -124,8 +117,7 @@ function fittedProgressAt(keyframes: readonly { offset: number; value: number; e
         const from = keyframes[index - 1]!;
         const to = keyframes[index]!;
         const localOffset = to.offset > from.offset ? invLerp(offset, from.offset, to.offset) : 1;
-        const curve = curves[index];
-        const easedProgress = curve ? curve.coordinateAt('y', curve.parameterAt('x', localOffset)) : localOffset;
+        const easedProgress = curves[index - 1]?.progressAt(localOffset) ?? localOffset;
         return lerp(from.value, to.value, easedProgress);
     };
 }
@@ -133,17 +125,16 @@ function fittedProgressAt(keyframes: readonly { offset: number; value: number; e
 function render(): void {
     try {
         failure.classList.add('hidden');
-        const transition = transitionOf(currentKind(), valuesByKind[currentKind()]);
-        const {spring, duration} = resolveSpring(transition);
+        const animation = AnimationDefinition.of(transitionOf(currentKind(), valuesByKind[currentKind()]));
+        const easing = animation.easing as SpringEasing;
+        const {spring, duration} = easing;
         const target = document.createElement('div');
-        const [effect] = new SimpleAnimationResolver(0, Animation.of(transition), {
-            target,
-            values: {progress: {0: 0, 1: 1}}
-        }).resolve().get(target)!;
-        const keyframes = effect!.animation.progress!;
+        const targetValues = [{target, properties: {progress: {stops: PropertyStops.of('progress', {0: 0, 1: 1}), unit: ''}}}];
+        const [effect] = AnimationTracksResolver.resolve(resolveTimings(animation, 1), () => targetValues).get(target)!.progress!;
+        const {keyframes} = effect!;
         playableFit = {keyframes, easing: effect!.easing, duration};
         const fitAt = fittedProgressAt(keyframes, duration);
-        const splinePoints = Object.entries(SpringSplineFitter.fit(spring, duration))
+        const splinePoints = Object.entries(SpringSplineFitter.fit(easing))
             .map(([offset, point]) => ({offset: Number(offset), ...point}))
             .sort((first, second) => first.offset - second.offset);
 
@@ -170,25 +161,26 @@ function render(): void {
     }
 }
 
+let abortController = new AbortController();
 /** Plays the resolved effect with WAAPI, its progress carrying the ball across the track. */
 function playBall(): void {
     if (!playableFit) return;
     const {keyframes, easing, duration} = playableFit;
     const travel = track.clientWidth - ball.offsetWidth;
     ballPlayback?.cancel();
+    abortController.abort();
+    abortController = new AbortController();
     ballPlayback = ball.animate(
-        keyframes.map(({offset, value}, index) => ({
+        keyframes.map(({offset, value, easing}) => ({
             offset,
             transform: `translateX(${value * travel}px)`,
-            // WAAPI puts an easing on the keyframe it leads from; ours sit on the keyframe they lead to.
-            easing: cssEasing(keyframes[index + 1]?.easing)
+            ...(easing && {easing: cssEasingOf(easing)})
         })),
-        {duration: duration * 1000, easing: cssEasing(easing), fill: 'forwards'}
+        {duration: duration * 1000, easing: cssEasingOf(easing), fill: 'forwards'}
     );
-}
-
-function cssEasing(easing: unknown): string {
-    return easing instanceof CubicBezierEasing ? `cubic-bezier(${easing.definition.join(', ')})` : 'linear';
+    ballPlayback.addEventListener("finish", () => {
+        setTimeout(() => ballPlayback?.cancel(), 1000);
+    }, { signal: abortController.signal, once: true });
 }
 
 function renderStats(entries: [string, string][]): void {

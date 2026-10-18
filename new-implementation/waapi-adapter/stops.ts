@@ -1,6 +1,5 @@
 import type {Progress} from "../types.js";
 import {remap, sortedByKey} from "../utils.js";
-import type {SimpleAnimationMapping} from "./resolver.js";
 
 export type RawValueStops = {
     [progress: number]: number;
@@ -9,29 +8,6 @@ export type RawValueStops = {
 interface ValueStop {
     progress: Progress;
     value: number;
-}
-
-export class PropertyValues {
-    private constructor(private readonly byProperty: { [property: string]: PropertyStops }) {}
-
-    static of(values: SimpleAnimationMapping['values']): PropertyValues {
-        return new PropertyValues(Object.fromEntries(Object
-        .entries(values)
-        .map(([property, valueStops]) => [property, PropertyStops.of(property, valueStops)])
-        ));
-    }
-
-    /** Swaps every property's start and end values. */
-    flip(): PropertyValues {
-        return new PropertyValues(this.map(stops => stops.flip()));
-    }
-
-    map<Result>(transform: (stops: PropertyStops, property: string) => Result): { [property: string]: Result } {
-        return Object.fromEntries(Object
-        .entries(this.byProperty)
-        .map(([property, stops]) => [property, transform(stops, property)])
-        );
-    }
 }
 
 /** One property's values along the change, sorted by progress, with the closest value filling in a missing end. */
@@ -52,6 +28,11 @@ export class PropertyStops {
         if (first.progress !== 0) stops.unshift({progress: 0, value: first.value});
         if (last.progress !== 1) stops.push({progress: 1, value: last.value});
         return new PropertyStops(stops);
+    }
+
+    /** The value throughout. */
+    static constant(value: number): PropertyStops {
+        return new PropertyStops([{progress: 0, value}, {progress: 1, value}]);
     }
 
     /** The stop's own value at a stop; linear between the surrounding stops; past either end, it continues the nearest segment, as a spring overshoots. */

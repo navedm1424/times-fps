@@ -1,4 +1,5 @@
-import type {Easing} from "./easing.js";
+import {DampedSpring} from "./damped-spring.js";
+import {type Easing, type EasingFunction, linear, resolveEasing, SpringEasing} from "./easing.js";
 import type {Progress, Seconds} from "./types.js";
 
 export type Transition = EasedTransition | SpringTransition;
@@ -56,4 +57,53 @@ export function spring(
     options: Omit<PhysicalSpringTransition, 'type'> | Omit<PerceptualSpringTransition, 'type'> | Omit<VisualSpringTransition, 'type'>
 ): SpringTransition {
     return {type: 'spring', ...options};
+}
+
+/** How long one play of the transition lasts, and the easing it runs. */
+export function resolveTransition(transition: Transition): { duration: Seconds; easing: EasingFunction } {
+    if (transition.type === 'eased')
+        return {duration: transition.duration, easing: transition.easing ? resolveEasing(transition.easing) : linear};
+
+    const {spring, duration} = resolveSpring(transition);
+    return {duration, easing: new SpringEasing(spring, duration)};
+}
+
+/** The spring a transition describes, and how long it runs until it's at rest. */
+export function resolveSpring(transition: SpringTransition): { spring: DampedSpring; duration: Seconds } {
+    const velocity = transition.velocity ?? 0;
+    if ('stiffness' in transition) {
+        const spring = DampedSpring.physical(transition.stiffness, transition.damping, transition.mass ?? 1, velocity);
+        return {spring, duration: spring.restTime(transition.restDelta ?? progressPrecision)};
+    }
+
+    const dampingRatio = dampingRatioOfBounce(transition.bounce);
+    if ('visualDuration' in transition) {
+        const spring = new DampedSpring(2 * Math.PI / transition.visualDuration, dampingRatio, velocity);
+        return {spring, duration: spring.restTime(progressPrecision)};
+    }
+    return {spring: springRestingAfter(transition.duration, dampingRatio, velocity), duration: transition.duration};
+}
+
+/** Apple's mapping: a positive bounce lowers the damping ratio from 1, and a negative one raises it past 1. */
+function dampingRatioOfBounce(bounce: number): number {
+    return bounce >= 0 ? 1 - bounce : 1 / (1 + bounce);
+}
+
+const maxRestingRounds = 16;
+
+/**
+ * The spring of the damping ratio that comes to rest exactly at `duration`.
+ * Its rest time shrinks in proportion as its natural frequency grows, except that the velocity, in progress per second, changes meaning with it; a few rounds settle that.
+ */
+function springRestingAfter(duration: Seconds, dampingRatio: number, velocity: number): DampedSpring {
+    const naturalFrequencyFor = (naturalFrequency: number) =>
+        new DampedSpring(1, dampingRatio, velocity / naturalFrequency).restTime(progressPrecision) / duration;
+
+    let naturalFrequency = new DampedSpring(1, dampingRatio).restTime(progressPrecision) / duration;
+    for (let round = 0; round < maxRestingRounds; round++) {
+        const next = naturalFrequencyFor(naturalFrequency);
+        if (Math.abs(next - naturalFrequency) <= naturalFrequency * 1e-12) break;
+        naturalFrequency = next;
+    }
+    return new DampedSpring(naturalFrequency, dampingRatio, velocity);
 }

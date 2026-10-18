@@ -1,4 +1,5 @@
-import type {Transition} from "./transition.js";
+import type {EasingFunction} from "./easing.js";
+import {resolveTransition, type Transition} from "./transition.js";
 import type {RepeatOptions, Seconds, Stagger} from "./types.js";
 import {checkNumber, clampedDelay, clampedRepeats} from "./utils.js";
 
@@ -19,7 +20,7 @@ export interface AnimationOptions extends RepeatOptions {
     delay?: Seconds | Stagger;
 }
 
-export class Animation {
+export class AnimationDefinition {
     protected constructor(readonly options: AnimationOptions = {}) {}
 
     static of(transition: Transition, options?: AnimationOptions): SimpleAnimation;
@@ -28,7 +29,7 @@ export class Animation {
     static of(
         transitionOrTweens: Transition | readonly TimedTween[],
         options?: AnimationOptions
-    ): Animation {
+    ): AnimationDefinition {
         if (options) {
             if (typeof options.delay === 'number') checkNumber(options.delay, "The animation's delay");
             checkNumber(options.repeatDelay, "The animation's repeat delay");
@@ -56,14 +57,21 @@ function checkTransition(transition: Transition, label: string): void {
     if ('visualDuration' in transition) checkNumber(transition.visualDuration, `${label}'s visual duration`);
 }
 
-export class SimpleAnimation extends Animation {
+export class SimpleAnimation extends AnimationDefinition {
     readonly type = "simple" as const;
+    /** How long one play lasts. */
+    readonly duration: Seconds;
+    readonly easing: EasingFunction;
+
     constructor(readonly transition: Transition, options?: AnimationOptions) {
         super(options);
+        const {duration, easing} = resolveTransition(transition);
+        this.duration = duration;
+        this.easing = easing;
     }
 }
 
-// export class SelfTimedAnimation<T extends string[]> extends Animation {
+// export class SelfTimedAnimation<T extends string[]> extends AnimationDefinition {
 //     readonly type = "self-timed" as const;
 //     constructor(
 //         readonly transition: Transition,
@@ -76,7 +84,7 @@ export class SimpleAnimation extends Animation {
 //     }
 // }
 
-export class TimedTweenAnimation<T extends string[]> extends Animation {
+export class TimedTweenAnimation<T extends string[]> extends AnimationDefinition {
     readonly type = "timed-tween" as const;
     constructor(
         readonly tweens: {

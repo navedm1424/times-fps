@@ -1,5 +1,5 @@
-import type {Progress, Seconds} from "../types.js";
-import {solveMonotone} from "../utils.js";
+import type {Progress, Seconds} from "./types.js";
+import {solveMonotone} from "./utils.js";
 
 /** The closed-form motion of one damping regime, as the signed distance from the target. */
 interface SpringMotion {

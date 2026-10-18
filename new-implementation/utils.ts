@@ -1,22 +1,21 @@
 
-import type {Easing} from "./easing.js";
-import type {At, Progress, RepeatOptions, Seconds, Stagger} from "./types.js";
-
-declare function ease(easing: Easing, progress: Progress): Progress;
+import {type Easing, resolveEasing} from "./easing.js";
+import type {At, RepeatOptions, Seconds, Stagger} from "./types.js";
 
 export function stagger(each: Seconds, options: {
     from?: 'first' | 'last' | 'center' | number;
     easing?: Easing;
 } = {}): Stagger {
     const {from = 'first', easing} = options;
+    const easingFunction = easing && resolveEasing(easing);
     return (index, total) => {
         const origin = originIndex(from, total);
         const distance = Math.abs(index - origin);
-        if (!easing) return distance * each;
+        if (!easingFunction) return distance * each;
 
         const farthestDistance = Math.max(origin, total - 1 - origin);
         if (farthestDistance === 0) return 0;
-        return ease(easing, distance / farthestDistance) * farthestDistance * each;
+        return easingFunction.progressAt(distance / farthestDistance) * farthestDistance * each;
     };
 }
 

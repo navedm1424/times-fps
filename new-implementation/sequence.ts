@@ -58,16 +58,8 @@ export class SequenceBuilder<SE extends SequenceEntries = {}> {
         checkNumber(options.repeatDelay, "The sequence's repeat delay");
         checkNumber(options.repeatCount, "The sequence's repeat count", {allowInfinity: true});
 
-        if (options.repeatCount === Infinity && Object.values(this.entries).some(repeatsInfinitely))
-            throw new RangeError("A sequence containing an infinitely repeating entry can't repeat infinitely.");
-
         return new Sequence(this.names, this.entries as { [K in keyof SE]: SE[K] }, clampedDelay(clampedRepeats(options)));
     }
-}
-
-function repeatsInfinitely(entry: SequenceEntry): boolean {
-    if ('animation' in entry) return entry.animation.options.repeatCount === Infinity;
-    return entry.sequence.options.repeatCount === Infinity || Object.values<SequenceEntry>(entry.sequence.entries).some(repeatsInfinitely);
 }
 
 export interface SequenceOptions extends RepeatOptions {

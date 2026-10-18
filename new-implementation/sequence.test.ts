@@ -1,10 +1,10 @@
 import {describe, expect, it} from "vitest";
-import {Animation} from "./animation.js";
+import {AnimationDefinition} from "./animation.js";
 import {Sequence} from "./sequence.js";
 import {eased} from "./transition.js";
 
 describe("SequenceBuilder.build", () => {
-    const builder = () => Sequence.builder().add('a', Animation.of(eased(1)));
+    const builder = () => Sequence.builder().add('a', AnimationDefinition.of(eased(1)));
 
     it("rejects time fields that aren't finite and a repeat count that isn't a number", () => {
         expect(() => builder().build({delay: Infinity})).toThrow(RangeError);
