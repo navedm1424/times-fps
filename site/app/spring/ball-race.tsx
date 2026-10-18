@@ -1,10 +1,10 @@
 "use client";
 
-import {PlayIcon} from "lucide-react";
 import {useRef, useState} from "react";
 import {spring, type SpringTransition} from "timesfps";
-import {Button} from "@/components/ui/button";
-import {ToggleGroup, ToggleGroupItem} from "@/components/ui/toggle-group";
+import {PlayIcon} from "@/components/icons/play-icon";
+import {ChipTray} from "@/components/tray/chip-tray";
+import {TrayIconButton} from "@/components/tray/tray-icon-button";
 import {type BallId, playToEnd, returnToStart} from "./ball-players";
 
 const balls: { id: BallId; title: string; method: string }[] = [
@@ -34,40 +34,33 @@ export function BallRace({transition}: { transition: SpringTransition }) {
     return (
         <section className="grid gap-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                    <PlayButton label="Play all" disabled={playing || playAllSelection.length === 0}
-                                onClick={() => play(playAllSelection)}/>
-                    <h2 className="font-heading text-base font-medium">Playback</h2>
-                </div>
-                <div className="flex items-center gap-2">
-                    <span id="play-all-selection" className="text-xs text-muted-foreground">Play all</span>
-                    <ToggleGroup
-                        multiple
-                        variant="outline"
-                        size="sm"
-                        spacing={0}
-                        aria-labelledby="play-all-selection"
-                        value={playAllSelection}
-                        onValueChange={selection => setPlayAllSelection(selection as BallId[])}
-                    >
-                        {balls.map(({id, title}) => (
-                            <ToggleGroupItem key={id} value={id} className="text-muted-foreground aria-pressed:text-foreground">
-                                {title}
-                            </ToggleGroupItem>
-                        ))}
-                    </ToggleGroup>
-                </div>
+                <h2 className="font-heading text-base font-medium">Playback</h2>
+                <ChipTray
+                    label="Balls to play"
+                    options={balls.map(({id, title}) => ({value: id, label: title}))}
+                    value={playAllSelection}
+                    onValueChange={selection => setPlayAllSelection(selection as BallId[])}
+                    action={{
+                        id: "play",
+                        label: "Play the selected balls",
+                        icon: <PlayIcon/>,
+                        onSelect: () => play(playAllSelection),
+                        disabled: playing || playAllSelection.length === 0
+                    }}
+                />
             </div>
-            <div className="grid gap-4">
+            <div className="grid gap-6">
                 {balls.map(({id, title, method}) => (
-                    <div key={id} className="grid gap-2.5">
-                        <div className="flex items-center gap-3">
-                            <PlayButton label={`Play ${title}`} disabled={playing} onClick={() => play([id])}/>
+                    <div key={id} className="grid gap-2">
+                        <div className="flex items-center justify-between gap-3">
                             <h3 className="text-sm font-medium">
                                 {title} <span className="font-normal text-muted-foreground">{method}</span>
                             </h3>
+                            <TrayIconButton label={`Play ${title}`} disabled={playing} onClick={() => play([id])}>
+                                <PlayIcon/>
+                            </TrayIconButton>
                         </div>
-                        <div className="rounded-full bg-muted p-1">
+                        <div className="" style={{ backgroundImage: "linear-gradient(to bottom, transparent calc(50% - 1px), var(--muted) calc(50% - 1px) calc(50% + 1px), transparent calc(50% + 1px))" }}>
                             <div className="@container">
                                 <div
                                     ref={element => {
@@ -81,13 +74,5 @@ export function BallRace({transition}: { transition: SpringTransition }) {
                 ))}
             </div>
         </section>
-    );
-}
-
-function PlayButton({label, disabled, onClick}: { label: string; disabled: boolean; onClick(): void }) {
-    return (
-        <Button variant="outline" size="icon-sm" aria-label={label} disabled={disabled} onClick={onClick}>
-            <PlayIcon className="fill-current"/>
-        </Button>
     );
 }

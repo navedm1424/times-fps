@@ -86,6 +86,13 @@
   --precision-band: color-mix(in oklab, #2a78d6 10%, transparent);
   --chart-grid: #e1e0d9;
   --chart-axis: #c3c2b7;
+  --tray-fill: color-mix(in oklab, var(--foreground) 4.5%, transparent);
+  --tray-edge: color-mix(in oklab, var(--foreground) 3%, transparent);
+  --tray-highlight: color-mix(in oklab, var(--foreground) 7%, transparent);
+  --tray-on: color-mix(in oklab, var(--foreground) 12%, transparent);
+  --tray-on-hover: color-mix(in oklab, var(--foreground) 16%, transparent);
+  --tray-rule: color-mix(in oklab, var(--foreground) 12%, transparent);
+  --tray-ease: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .dark {
@@ -125,6 +132,12 @@
   --precision-band: color-mix(in oklab, #3987e5 16%, transparent);
   --chart-grid: #2c2c2a;
   --chart-axis: #383835;
+  --tray-fill: color-mix(in oklab, var(--foreground) 6%, transparent);
+  --tray-edge: color-mix(in oklab, var(--foreground) 5%, transparent);
+  --tray-highlight: color-mix(in oklab, var(--foreground) 9%, transparent);
+  --tray-on: color-mix(in oklab, var(--foreground) 16%, transparent);
+  --tray-on-hover: color-mix(in oklab, var(--foreground) 20%, transparent);
+  --tray-rule: color-mix(in oklab, var(--foreground) 12%, transparent);
 }
 
 @layer base {

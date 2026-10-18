@@ -1,7 +1,7 @@
 "use client";
 
 import {type PointerEvent, type ReactNode, useLayoutEffect, useRef, useState} from "react";
-import {Toggle} from "@/components/ui/toggle";
+import {ChipTray} from "@/components/tray/chip-tray";
 import {progressPrecision} from "@/lib/timesfps-internals";
 import {type ChartBox, chartMargin, niceStep, polylinePoints, type Scale, scaleFor, splinePath, ticksBetween} from "./chart-scale";
 import type {SpringFit} from "./spring-fit";
@@ -14,6 +14,8 @@ const layerLabels: { [Name in Layer]: string } = {
     splinePoints: "Spline points"
 };
 
+const layers = Object.keys(layerLabels) as Layer[];
+
 export function FitCharts({fit}: { fit: SpringFit }) {
     const [visibleLayers, setVisibleLayers] = useState<{ [Name in Layer]: boolean }>({spring: true, spline: true, splinePoints: true});
     const [hoveredIndex, setHoveredIndex] = useState<number>();
@@ -23,21 +25,12 @@ export function FitCharts({fit}: { fit: SpringFit }) {
             <div className="grid gap-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                     <h3 className="text-sm font-medium">Progress</h3>
-                    <div className="flex flex-wrap gap-1">
-                        {(Object.keys(layerLabels) as Layer[]).map(layer => (
-                            <Toggle
-                                key={layer}
-                                variant="outline"
-                                size="sm"
-                                pressed={visibleLayers[layer]}
-                                onPressedChange={pressed => setVisibleLayers(layers => ({...layers, [layer]: pressed}))}
-                                className="text-muted-foreground aria-pressed:text-foreground"
-                            >
-                                <LayerKey layer={layer}/>
-                                {layerLabels[layer]}
-                            </Toggle>
-                        ))}
-                    </div>
+                    <ChipTray
+                        label="Layers shown"
+                        options={layers.map(layer => ({value: layer, label: layerLabels[layer], icon: <LayerKey layer={layer}/>}))}
+                        value={layers.filter(layer => visibleLayers[layer])}
+                        onValueChange={shown => setVisibleLayers(Object.fromEntries(layers.map(layer => [layer, shown.includes(layer)])) as { [Name in Layer]: boolean })}
+                    />
                 </div>
                 <CurvesChart fit={fit} visibleLayers={visibleLayers} hoveredIndex={hoveredIndex} onHover={setHoveredIndex}/>
             </div>
@@ -57,8 +50,8 @@ export function FitCharts({fit}: { fit: SpringFit }) {
 }
 
 function LayerKey({layer}: { layer: Layer }) {
-    if (layer === "splinePoints") return <span className="size-2 rounded-full bg-foreground"/>;
-    return <span className={layer === "spring" ? "h-1 w-3.5 rounded-full bg-(--series-spring)" : "h-0.5 w-3.5 rounded-full bg-(--series-spline)"}/>;
+    if (layer === "splinePoints") return <span className="size-1.5 rounded-full bg-foreground"/>;
+    return <span className={`h-0.5 w-3 rounded-full ${layer === "spring" ? "bg-(--series-spring)" : "bg-(--series-spline)"}`}/>;
 }
 
 interface HoverProps {
@@ -94,14 +87,14 @@ function CurvesChart({fit, visibleLayers, hoveredIndex, onHover}: { fit: SpringF
                 <>
                     {visibleLayers.spring && (
                         <polyline points={polylinePoints(times, springProgresses, scale)} fill="none"
-                                  stroke="var(--series-spring)" strokeOpacity={0.45} strokeWidth={4} strokeLinejoin="round"/>
+                                  stroke="var(--series-spring)" strokeOpacity={0.45} strokeWidth={1.5} strokeLinejoin="round"/>
                     )}
                     {visibleLayers.spline && (
                         <path d={splinePath(splinePoints, scale)} fill="none" stroke="var(--series-spline)" strokeWidth={1.5}/>
                     )}
                     {visibleLayers.splinePoints && splinePoints.map(({time, progress}) => (
-                        <circle key={time} cx={scale.x(time)} cy={scale.y(progress)} r={3.5}
-                                fill="var(--foreground)" stroke="var(--card)" strokeWidth={2}/>
+                        <circle key={time} cx={scale.x(time)} cy={scale.y(progress)} r={2}
+                                fill="var(--foreground)" stroke="var(--card)" strokeWidth={1}/>
                     ))}
                     {hoveredIndex !== undefined && (
                         <>

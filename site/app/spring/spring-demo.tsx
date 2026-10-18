@@ -4,6 +4,7 @@ import {useMemo, useState} from "react";
 import {Card, CardContent, CardHeader, CardTitle} from "@/components/ui/card";
 import {BallRace} from "./ball-race";
 import {FitCharts} from "./fit-charts";
+import {FitStats} from "./fit-stats";
 import {SpringControls} from "./spring-controls";
 import {fitSpring} from "./spring-fit";
 import {initialValuesByKind, type SpringKind, transitionOf} from "./spring-parameters";
@@ -40,19 +41,31 @@ export function SpringDemo() {
                     </CardContent>
                 </Card>
             </div>
-            <Card className="lg:sticky lg:top-6">
-                <CardHeader>
-                    <CardTitle>Spring</CardTitle>
-                </CardHeader>
-                <CardContent>
-                    <SpringControls
-                        kind={kind}
-                        values={values}
-                        onKindChange={setKind}
-                        onValueChange={(name, value) => setValuesByKind(current => ({...current, [kind]: {...current[kind], [name]: value}}))}
-                    />
-                </CardContent>
-            </Card>
+            <div className="grid gap-6 lg:sticky lg:top-6">
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Spring</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <SpringControls
+                            kind={kind}
+                            values={values}
+                            onKindChange={setKind}
+                            onValueChange={(name, value) => setValuesByKind(current => ({...current, [kind]: {...current[kind], [name]: value}}))}
+                        />
+                    </CardContent>
+                </Card>
+                {!(fit instanceof Error) && (
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Stats</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <FitStats fit={fit}/>
+                        </CardContent>
+                    </Card>
+                )}
+            </div>
         </div>
     );
 }

@@ -1,0 +1,137 @@
+/* After uiarc.dev's floating button group: separate soft buttons in a translucent tray, corners concentric with it. */
+.tray {
+    --tray-height: 30px;
+    --tray-pad: 3px;
+    --tray-pad-x: 10px;
+    --tray-outer: 15px;
+    --tray-radius: calc(var(--tray-outer) - var(--tray-pad) - 1px);
+    position: relative;
+    isolation: isolate;
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: var(--tray-pad);
+    /* The surface draws the border, so the padding makes room for it. */
+    padding: calc(var(--tray-pad) + 1px);
+    border-radius: var(--tray-outer);
+    color: var(--muted-foreground);
+    -webkit-tap-highlight-color: transparent;
+}
+
+/* Painted apart from the tray's box, so its edges can trail the box on a spring while the chips morph. */
+.tray-surface {
+    position: absolute;
+    z-index: -1;
+    inset-block: 0;
+    border: 1px solid var(--tray-edge);
+    border-radius: var(--tray-outer);
+    background: var(--tray-fill);
+}
+
+/* The button is the hit area and the layout box; what you see is the surface, which trails the box while the width morphs. */
+.tray-item {
+    position: relative;
+    display: inline-flex;
+    flex: none;
+    height: var(--tray-height);
+    padding: 0;
+    border: 0;
+    border-radius: var(--tray-radius);
+    background: none;
+    color: inherit;
+    font: inherit;
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+    touch-action: manipulation;
+    transition: color 160ms var(--tray-ease);
+}
+.tray-item[aria-pressed="true"] { color: var(--foreground); }
+.tray-item:disabled { cursor: not-allowed; opacity: 0.5; }
+.tray-item:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+
+/* Press answers on the body, so it never fights the layout transform on the button. */
+.tray-item-body {
+    position: relative;
+    isolation: isolate;
+    display: inline-flex;
+    height: 100%;
+    align-items: center;
+    padding: 0 var(--tray-pad-x);
+    transition: scale 160ms var(--tray-ease);
+}
+.tray-item:active:not(:disabled) .tray-item-body { scale: 0.97; transition-duration: 120ms; }
+
+.tray-item-surface {
+    position: absolute;
+    z-index: -1;
+    inset-block: 0;
+    left: 0;
+    right: 0;
+    border-radius: var(--tray-radius);
+    transition: background-color 160ms var(--tray-ease);
+}
+.tray-item-body[data-selected="true"] .tray-item-surface { background: var(--tray-on); }
+@media (hover: hover) and (pointer: fine) {
+    .tray-item:not(:disabled):hover { color: var(--foreground); }
+    .tray-item:not(:disabled):hover .tray-item-surface { background: var(--tray-highlight); }
+    .tray-item:not(:disabled):hover .tray-item-body[data-selected="true"] .tray-item-surface { background: var(--tray-on-hover); }
+}
+
+/* The check grows from its left edge where the label started; the slot hands its width to the label in one layout step, and the label's offset springs it over. */
+.tray-check {
+    position: absolute;
+    top: calc(50% - 6px);
+    left: calc(var(--tray-pad-x) - 2px);
+    display: grid;
+    width: 12px;
+    height: 12px;
+    place-items: center;
+    transform-origin: 0 50%;
+}
+.tray-check svg { display: block; overflow: visible; }
+.tray-check-slot { width: 0; flex: none; }
+.tray-item-body[data-selected="true"] .tray-check-slot { width: 16px; }
+.tray-chip-content { display: inline-flex; align-items: center; gap: 6px; }
+
+.tray-icon-item .tray-item-body { width: var(--tray-height); justify-content: center; padding: 0; }
+.tray-icon-item svg, .tray-icon-button svg { width: 14px; height: 14px; }
+
+.tray-separator {
+    flex: none;
+    width: 1px;
+    height: calc(var(--tray-height) * 0.5);
+    margin-inline: 2px;
+    border-radius: 1px;
+    background: var(--tray-rule);
+}
+
+.tray-icon-button {
+    display: inline-grid;
+    flex: none;
+    width: 32px;
+    height: 32px;
+    place-items: center;
+    padding: 0;
+    border: 1px solid var(--tray-edge);
+    border-radius: 999px;
+    background: var(--tray-fill);
+    color: var(--muted-foreground);
+    cursor: pointer;
+    transition: color 160ms var(--tray-ease), box-shadow 160ms var(--tray-ease), scale 160ms var(--tray-ease);
+    -webkit-tap-highlight-color: transparent;
+}
+.tray-icon-button:active:not(:disabled) { scale: 0.95; transition-duration: 120ms; }
+.tray-icon-button:disabled { cursor: not-allowed; opacity: 0.5; }
+.tray-icon-button:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+@media (hover: hover) and (pointer: fine) {
+    .tray-icon-button:not(:disabled):hover { color: var(--foreground); box-shadow: inset 0 0 0 999px var(--tray-highlight); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .tray-item, .tray-item-body, .tray-item-surface, .tray-icon-button { transition: none; }
+    .tray-item:active .tray-item-body, .tray-icon-button:active { scale: none; }
+}
