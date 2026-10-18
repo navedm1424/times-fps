@@ -1,6 +1,6 @@
-## times-fps
+## timesfps
 
-`times-fps` is a TypeScript library for designing animations that play natively in the browser.
+`timesfps` is a TypeScript library for designing animations that play natively in the browser.
 
 - **Truly fluid native springs.** Springs are fitted as cubic Béziers that follow the real motion within 0.1%, not sampled into `linear()` approximations.
 - **Yoyo and mirror repeats.** Every other play runs backwards (`reverse`), or swaps its values while its easing keeps running forwards (`mirror`).
@@ -14,11 +14,11 @@ It's built on the Web Animations API. You describe an animation once and map it 
 ## Installation
 
 ```bash
-npm install times-fps
+npm install timesfps
 # or
-yarn add times-fps
+yarn add timesfps
 # or
-pnpm add times-fps
+pnpm add timesfps
 ```
 
 The library is written in TypeScript, ships as an ES module, and includes type definitions.
@@ -28,7 +28,7 @@ The library is written in TypeScript, ships as an ES module, and includes type d
 ## Quick Start
 
 ```ts
-import {AnimationDefinition, eased, WAAPIAdapter} from "times-fps";
+import {AnimationDefinition, eased, WAAPIAdapter} from "timesfps";
 
 const fadeIn = AnimationDefinition.of(eased(0.4, 'easeOut'));
 
@@ -53,7 +53,7 @@ A transition is how one play of an animation moves from start to end.
 ### Eased
 
 ```ts
-import {eased} from "times-fps";
+import {eased} from "timesfps";
 
 eased(0.4);                              // linear, 0.4 seconds
 eased(0.4, 'easeInOut');                 // 'linear' | 'ease' | 'easeIn' | 'easeOut' | 'easeInOut'
@@ -66,7 +66,7 @@ eased(1, [4, 'jumpStart']);              // steps: 'jumpStart' | 'jumpEnd' | 'ju
 Springs come in three flavours. Each works out how long it runs.
 
 ```ts
-import {spring} from "times-fps";
+import {spring} from "timesfps";
 
 // Perceptual: comes to rest exactly at `duration`; `bounce` 0 means no overshoot.
 spring({duration: 0.6, bounce: 0.3});
@@ -87,7 +87,7 @@ Springs are played as fitted cubic Bézier keyframes, within 0.1% of the true mo
 ## Animations
 
 ```ts
-import {AnimationDefinition, eased, stagger} from "times-fps";
+import {AnimationDefinition, eased, stagger} from "timesfps";
 
 const pulse = AnimationDefinition.of(eased(0.5, 'easeInOut'), {
     delay: 0.2,             // seconds, or a stagger
@@ -125,7 +125,7 @@ AnimationDefinition.of(eased(0.3), {
 A sequence lays named entries out in time. Entries are animations or other sequences.
 
 ```ts
-import {AnimationDefinition, eased, spring, Sequence} from "times-fps";
+import {AnimationDefinition, eased, spring, Sequence} from "timesfps";
 
 const intro = Sequence.builder()
     .add('title', AnimationDefinition.of(spring({duration: 0.6, bounce: 0.2})))
@@ -272,4 +272,4 @@ When entries animate the same property of the same element, the one declared lat
     - `.build(options?)` takes a `delay` and the repeat options.
 - **`new WAAPIAdapter().animate(definition, mapping, scope?)`**: plays a definition on elements and returns the native `Animation`s.
 
-Everything is exported from the root `times-fps` entry point, along with the types of every option and mapping.
+Everything is exported from the root `timesfps` entry point, along with the types of every option and mapping.
