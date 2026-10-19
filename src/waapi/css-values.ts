@@ -1,7 +1,8 @@
-import {checkNumber} from "../utils.js";
+import {checkNumber} from "../utils/validation.js";
+import type {CSSValueResolver} from "./effect-chains.js";
 import type {CSSValue, ValueStops} from "./mapping.js";
 import {PropertyStops} from "./stops.js";
-import type {TargetValues} from "./tracks.js";
+import type {AllowedFill, TargetValues} from "./tracks.js";
 
 /** The CSS name of a property given in camelCase; a custom property is already given by it. */
 export function cssPropertyNameOf(property: string): string {
@@ -19,47 +20,37 @@ export function keyframePropertyOf(property: string): string {
     return property;
 }
 
-export function resolveTargetValues(targets: readonly Element[], values: { [property: string]: ValueStops }): TargetValues[] {
+/** Each target's stops, as CSS text; a bare number takes the property's default unit. */
+export function resolveTargetValues(
+    targets: readonly Element[],
+    values: { [property: string]: ValueStops },
+    composite: CompositeOperation,
+    allowedFill: AllowedFill
+): TargetValues[] {
+    const textStops = Object.entries(values).map(([property, valueStops]) => {
+        const type = PropertyValueType.of(cssPropertyNameOf(property));
+        const texts = progressEntriesOf(valueStops).map(([progress, value]) => [progress, cssTextOf(property, value, type)]);
+        return [property, Object.fromEntries(texts)] as const;
+    });
     return targets.map(target => ({
         target,
-        properties: Object.fromEntries(Object.entries(values).map(([property, valueStops]) =>
-            [property, resolvePropertyStops(target, property, valueStops)]
-        ))
+        properties: Object.fromEntries(textStops.map(([property, texts]) => [property, {stops: PropertyStops.of(property, texts, composite), composite, allowedFill}]))
     }));
 }
 
-/**
- * The stops as numbers in one unit: as given when every value is a number with the same unit; otherwise the values that aren't a number in the property's default unit are resolved on the target.
- * A bare number takes the property's default unit.
- */
-function resolvePropertyStops(target: Element, property: string, valueStops: ValueStops): { stops: PropertyStops; unit: string } {
-    const cssName = cssPropertyNameOf(property);
-    const type = PropertyValueType.of(cssName);
-    const texts = Object.entries(valueStops).map(([progress, value]) => [progress, cssTextOf(property, value, type)] as const);
-    for (const [, text] of texts) {
-        if (!CSS.supports(cssName, text))
-            throw new Error(`"${text}" isn't a value "${cssName}" takes.`);
-    }
+/** Resolves values on the page: its current values are computed styles, and its expressions resolve through probes. */
+export const domValueResolver: CSSValueResolver = {
+    currentValueOf: (target, property) => getComputedStyle(target).getPropertyValue(cssPropertyNameOf(property)).trim(),
+    accepts: (property, text) => CSS.supports(cssPropertyNameOf(property), text),
+    resolve: (target, property, text) => PropertyValueType.of(cssPropertyNameOf(property)).resolve(target, text)
+};
 
-    const given = texts.map(([progress, text]) => [progress, text, parseNumeric(text)] as const);
-    const givenUnits = new Set(given.map(([, , numeric]) => numeric?.unit));
-    const unitsAgree = givenUnits.size === 1 && !givenUnits.has(undefined);
-    const numerics = given.map(([progress, text, numeric]) => {
-        if (numeric && (unitsAgree || numeric.unit === type.defaultUnit)) return [progress, numeric] as const;
-        const resolved = type.resolve(target, text);
-        const resolvedNumeric = parseNumeric(resolved);
-        if (!resolvedNumeric) throw new Error(`"${text}" resolves to "${resolved}" for "${cssName}", which isn't a single number with a unit.`);
-        return [progress, resolvedNumeric] as const;
-    });
-
-    const units = new Set(numerics.map(([, {unit}]) => unit));
-    if (units.size > 1)
-        throw new Error(`The values of "${cssName}" resolve to different units: ${[...units].map(unit => `"${unit}"`).join(', ')}.`);
-
-    return {
-        stops: PropertyStops.of(property, Object.fromEntries(numerics.map(([progress, {value}]) => [progress, value]))),
-        unit: numerics[0]?.[1].unit ?? ''
-    };
+/** A list's values are spread evenly from 0 to 1; a single one stands at 0. */
+function progressEntriesOf(valueStops: ValueStops): [progress: number, value: CSSValue][] {
+    if (!Array.isArray(valueStops))
+        return Object.entries(valueStops).map(([progress, value]) => [Number(progress), value]);
+    const values: readonly CSSValue[] = valueStops;
+    return values.map((value, index) => [values.length > 1 ? index / (values.length - 1) : 0, value]);
 }
 
 function cssTextOf(property: string, value: CSSValue, type: PropertyValueType): string {
@@ -68,13 +59,6 @@ function cssTextOf(property: string, value: CSSValue, type: PropertyValueType): 
     if (type.defaultUnit === undefined)
         throw new Error(`"${property}" doesn't take a bare number, so ${value} needs a unit.`);
     return `${value}${type.defaultUnit}`;
-}
-
-const numericPattern = /^\s*([+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)([a-z%]*)\s*$/i;
-
-function parseNumeric(text: string): { value: number; unit: string } | undefined {
-    const [, number, unit] = numericPattern.exec(text) ?? [];
-    return number === undefined ? undefined : {value: Number(number), unit: unit!.toLowerCase()};
 }
 
 /** A kind of numeric value a property may take, told by whether it takes a sample of it. */

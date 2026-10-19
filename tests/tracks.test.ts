@@ -4,32 +4,59 @@ import {CubicBezierEasing, type EasingFunction, linear, StepsEasing} from "../sr
 import {Sequence} from "../src/sequence.js";
 import {eased, spring, type Transition} from "../src/transition.js";
 import type {RepeatOptions} from "../src/types.js";
-import {lerp} from "../src/utils.js";
+import {lerp} from "../src/utils/math.js";
 import type {NativeAnimationEffect, NativeKeyframe} from "../src/waapi/native-effects.js";
 import {cssEasingOf, type NativeEasing} from "../src/waapi/native-easing.js";
-import {PropertyStops, type RawValueStops} from "../src/waapi/stops.js";
-import {type EntryPath, resolveTimings} from "../src/waapi/timings.js";
-import {type AnimationTracks, AnimationTracksResolver, type TargetValues} from "../src/waapi/tracks.js";
+import type {CSSValueResolver} from "../src/waapi/effect-chains.js";
+import {PropertyStops, type NumericValueStops} from "../src/waapi/stops.js";
+import {type EntryPath, resolveTimings, type SequenceTimings} from "../src/waapi/timings.js";
+import {type AllowedFill, type AnimationTracks, AnimationTracksResolver, type TargetValues} from "../src/waapi/tracks.js";
 
 const target = {} as Element;
 const line = {x: {0: 0, 1: 1}};
 
-function targetValuesOf(element: Element, values: { [property: string]: RawValueStops }): TargetValues {
+/** Values are plain numbers without a unit, and every property is 0.25 now. */
+const numericResolver: CSSValueResolver = {
+    currentValueOf: () => '0.25',
+    accepts: () => true,
+    resolve: (_target, _property, text) => text
+};
+
+function targetValuesOf(
+    element: Element,
+    values: { [property: string]: { [progress: number]: number | string } },
+    composite: CompositeOperation = 'replace',
+    allowedFill: AllowedFill = 'both'
+): TargetValues {
     return {
         target: element,
-        properties: Object.fromEntries(Object.entries(values).map(([property, stops]) => [property, {stops: PropertyStops.of(property, stops), unit: ''}]))
+        properties: Object.fromEntries(Object.entries(values).map(([property, stops]) => [property, {stops: PropertyStops.of(property, stops, composite), composite, allowedFill}]))
     };
 }
 
-function animationTracksOf(animation: SimpleAnimation, values: { [property: string]: RawValueStops } = line, targets = [target]): AnimationTracks {
-    const targetValues = targets.map(element => targetValuesOf(element, values));
-    return AnimationTracksResolver.resolve(resolveTimings(animation, targets.length), () => targetValues);
+/** The stops with their values resolved as plain numbers. */
+function resolvedStopsOf(values: NumericValueStops): PropertyStops {
+    const stops = PropertyStops.of('x', values);
+    for (const value of stops.values) value.resolve(Number(value.text));
+    return stops;
 }
 
-function sequenceTracksOf(sequence: Sequence, valuesByPath: { [path: EntryPath]: { [property: string]: RawValueStops } }): AnimationTracks {
-    const targetValues = new Map(Object.entries(valuesByPath).map(([path, values]) => [path, [targetValuesOf(target, values)]]));
+function animationTracksOf(animation: SimpleAnimation, values: { [property: string]: NumericValueStops } = line, targets = [target]): AnimationTracks {
+    const targetValues = targets.map(element => targetValuesOf(element, values));
+    return AnimationTracksResolver.resolve(resolveTimings(animation, targets.length), () => targetValues, numericResolver);
+}
+
+function sequenceTracksOf(
+    sequence: Sequence,
+    valuesByPath: { [path: EntryPath]: { [property: string]: { [progress: number]: number | string } } },
+    targetsByPath: { [path: EntryPath]: Element[] } = {},
+    compositesByPath: { [path: EntryPath]: CompositeOperation } = {}
+): AnimationTracks {
+    const targetValues = new Map(Object.entries(valuesByPath).map(([path, values]) =>
+        [path, (targetsByPath[path] ?? [target]).map(element => targetValuesOf(element, values, compositesByPath[path]))]
+    ));
     const targetCounts = new Map([...targetValues].map(([path, values]) => [path, values.length]));
-    return AnimationTracksResolver.resolve(resolveTimings(sequence, targetCounts), path => targetValues.get(path)!);
+    return AnimationTracksResolver.resolve(resolveTimings(sequence, targetCounts), path => targetValues.get(path)!, numericResolver);
 }
 
 function timingOf({delay, duration, iterations, direction, fill}: NativeAnimationEffect) {
@@ -37,7 +64,7 @@ function timingOf({delay, duration, iterations, direction, fill}: NativeAnimatio
 }
 
 function keyframesOf(effect: NativeAnimationEffect): number[][] {
-    return effect.keyframes.map(({offset, value}) => [offset, value]);
+    return effect.keyframes.map(({offset, value}) => [offset, Number(value)]);
 }
 
 function closeTo(rows: number[][]) {
@@ -62,8 +89,8 @@ function keyframesValueAt(keyframes: readonly NativeKeyframe[], progress: number
     const index = Math.min(Math.max(keyframes.findLastIndex(keyframe => keyframe.offset <= progress), 0), keyframes.length - 2);
     const from = keyframes[index]!;
     const to = keyframes[index + 1]!;
-    if (to.offset === from.offset) return to.value;
-    return lerp(from.value, to.value, nativeProgressAt(from.easing, (progress - from.offset) / (to.offset - from.offset)));
+    if (to.offset === from.offset) return Number(to.value);
+    return lerp(Number(from.value), Number(to.value), nativeProgressAt(from.easing, (progress - from.offset) / (to.offset - from.offset)));
 }
 
 /** The effect's value at `time`, or undefined when it has none then, as a browser computes it. */
@@ -116,7 +143,7 @@ describe("resolveTimings", () => {
     it("starts an animation at its shortest staggered delay and ends it after its latest", () => {
         const animation = AnimationDefinition.of(eased(1), {delay: index => 0.25 + index * 0.5, repeatCount: 1, repeatDelay: 0.5});
         expect(resolveTimings(animation, 3)).toMatchObject({
-            firstStart: 0.25, shortestDelay: 0.25, playDuration: 1, totalDuration: 2.5, end: 3.75, lastReferenceableEnd: 3.75
+            firstStart: 0.25, playDuration: 1, totalDuration: 2.5, end: 3.75, lastReferenceableEnd: 3.75
         });
     });
 
@@ -129,9 +156,9 @@ describe("resolveTimings", () => {
         const sequence = Sequence.builder()
             .add('a', AnimationDefinition.of(eased(1)))
             .add('b', AnimationDefinition.of(eased(2), {delay: 0.25}), '+0.5')
-            .add('c', AnimationDefinition.of(eased(1)), 'b>+0')
+            .add('c', AnimationDefinition.of(eased(1)), 'b<+0')
             .build({delay: 1, repeatCount: 1, repeatDelay: 0.5});
-        const timings = resolveTimings(sequence, new Map([['a', 1], ['b', 1], ['c', 1]]));
+        const timings = resolveTimings(sequence, new Map([['a', 1], ['b', 1], ['c', 1]])) as SequenceTimings;
         expect(timings.entries.get('b')).toMatchObject({firstStart: 1.75, end: 3.75, lastReferenceableEnd: 3.75});
         expect(timings.entries.get('c')).toMatchObject({firstStart: 1.75, end: 2.75});
         expect(timings).toMatchObject({firstStart: 1, playDuration: 3.75, totalDuration: 8, end: 9, lastReferenceableEnd: 9});
@@ -213,8 +240,16 @@ describe("AnimationTracksResolver layouts", () => {
         expect(repeating!.keyframes.map(({easing}) => easing?.type)).toEqual(['cubic-bezier', undefined, undefined]);
     });
 
-    it("resolves nothing for a play without duration", () => {
-        expect(animationTracksOf(AnimationDefinition.of(eased(0))).size).toBe(0);
+    it("jumps to the end values for a play without duration", () => {
+        const effects = effectsOf(AnimationDefinition.of(eased(0)));
+        expect(effects.map(timingOf)).toEqual([{delay: 0, duration: 0, iterations: 1, direction: 'normal', fill: 'both'}]);
+        expect(keyframesOf(effects[0]!)).toEqual([[0, 0], [1, 1]]);
+    });
+
+    it("ends a mirrored play without duration where its last play ends", () => {
+        const effects = effectsOf(AnimationDefinition.of(eased(0), {repeatCount: 1, repeatDelay: 0.5, repeatMode: 'mirror'}));
+        expect(trackValueAt(effects, 0.25)).toBe(1);
+        expect(trackValueAt(effects, 1)).toBe(0);
     });
 
     it("adds each target's staggered delay to its effects", () => {
@@ -226,7 +261,7 @@ describe("AnimationTracksResolver layouts", () => {
 });
 
 const valuesWithStop = {x: {0: 0, 0.4: 0.7, 1: 1}};
-const stopsWithStop = PropertyStops.of('x', valuesWithStop.x);
+const stopsWithStop = resolvedStopsOf(valuesWithStop.x);
 const transitions: [string, Transition, number][] = [
     ['a cubic Bézier easing', eased(1, 'easeInOut'), 1e-6],
     ['an overshooting cubic Bézier easing', eased(1, [0.3, 1.6, 0.6, 1]), 1e-6],
@@ -388,6 +423,16 @@ describe("AnimationTracksResolver sequences", () => {
             .toEqual([{delay: 0.5, fill: 'forwards'}, {delay: 0, fill: 'backwards'}]);
     });
 
+    it("sets an entry without duration at its position, between the entries around it", () => {
+        const sequence = Sequence.builder()
+            .add('a', AnimationDefinition.of(eased(1)))
+            .add('b', AnimationDefinition.of(eased(0)), '+0.5')
+            .add('c', AnimationDefinition.of(eased(1)), '+0.5')
+            .build();
+        const effects = sequenceTracksOf(sequence, {a: {x: line.x}, b: {x: {0: 0.25, 1: 0.75}}, c: {x: {0: 0.75, 1: 0}}}).get(target)!.x!;
+        expect(sample(effects, [1.25, 1.75, 2.5, 3.5])).toEqual(closeTo([[1, 0.75, 0.375, 0]])[0]);
+    });
+
     it("drops an effect declared earlier that lies within a later one", () => {
         const sequence = Sequence.builder()
             .add('a', AnimationDefinition.of(eased(0.5)), 0.25)
@@ -395,6 +440,139 @@ describe("AnimationTracksResolver sequences", () => {
             .build();
         expect(sequenceTracksOf(sequence, {a: {x: line.x}, b: {x: line.x}}).get(target)!.x!.map(({delay, fill}) => ({delay, fill})))
             .toEqual([{delay: 0, fill: 'both'}]);
+    });
+});
+
+describe("AnimationTracksResolver staggered sequences", () => {
+    const cards = [{} as Element, {} as Element, {} as Element];
+    const icons = [{} as Element, {} as Element, {} as Element];
+    const startsOf = (tracks: AnimationTracks, elements: Element[], property: string) =>
+        elements.map(element => tracks.get(element)![property]![0]!.delay);
+
+    it("plays the sequence once per target index, chaining each copy's entries on their own", () => {
+        const sequence = Sequence.builder()
+            .add('lift', AnimationDefinition.of(eased(1)))
+            .add('glow', AnimationDefinition.of(eased(1)))
+            .build({delay: index => index * 0.25});
+        const tracks = sequenceTracksOf(sequence, {lift: {x: line.x}, glow: {y: line.x}}, {lift: cards, glow: icons});
+        expect(startsOf(tracks, cards, 'x')).toEqual([0, 0.25, 0.5]);
+        expect(startsOf(tracks, icons, 'y')).toEqual([1, 1.25, 1.5]);
+    });
+
+    it("pushes an entry of one copy on by its own stagger, as it would one target", () => {
+        const sequence = Sequence.builder()
+            .add('lift', AnimationDefinition.of(eased(1), {delay: index => index * 0.5}))
+            .add('glow', AnimationDefinition.of(eased(1)))
+            .build({delay: index => index * 0.25});
+        const tracks = sequenceTracksOf(sequence, {lift: {x: line.x}, glow: {y: line.x}}, {lift: cards, glow: icons});
+        expect(startsOf(tracks, cards, 'x')).toEqual([0, 0.75, 1.5]);
+        expect(startsOf(tracks, icons, 'y')).toEqual([1, 1.75, 2.5]);
+    });
+
+    it("rejects animations with different numbers of targets", () => {
+        const sequence = Sequence.builder()
+            .add('lift', AnimationDefinition.of(eased(1)))
+            .add('glow', AnimationDefinition.of(eased(1)))
+            .build({delay: index => index * 0.25});
+        expect(() => sequenceTracksOf(sequence, {lift: {x: line.x}, glow: {y: line.x}}, {lift: cards, glow: icons.slice(1)})).toThrow();
+    });
+});
+
+describe("AnimationTracksResolver effect chains", () => {
+    const sample = (effects: readonly NativeAnimationEffect[], times: number[]) => times.map(time => trackValueAt(effects, time));
+
+    it("starts an entry without a value at 0 from the value the track shows as it starts", () => {
+        const sequence = Sequence.builder()
+            .add('a', AnimationDefinition.of(eased(1)))
+            .add('b', AnimationDefinition.of(eased(1)), '-0.5')
+            .build();
+        const effects = sequenceTracksOf(sequence, {a: {x: {0: 0, 1: 1}}, b: {x: {1: 2}}}).get(target)!.x!;
+        expect(sample(effects, [0.25, 0.75, 1.5])).toEqual(closeTo([[0.25, 0.5 + 0.25 * 1.5, 2]])[0]);
+    });
+
+    it("starts a chain without a value at 0 from the property's current value", () => {
+        const effects = animationTracksOf(AnimationDefinition.of(eased(1)), {x: {1: 1}}).get(target)!.x!;
+        expect(keyframesOf(effects[0]!)).toEqual([[0, 0.25], [1, 1]]);
+    });
+
+    it("starts an entry that adds to what's under it from its first value, and never makes it a start for another", () => {
+        const sequence = Sequence.builder()
+            .add('a', AnimationDefinition.of(eased(1)))
+            .add('b', AnimationDefinition.of(eased(1)), 0.5)
+            .add('c', AnimationDefinition.of(eased(1)), 0.75)
+            .build();
+        const tracks = sequenceTracksOf(sequence, {a: {x: {0: 0, 1: 1}}, b: {x: {0.5: 3, 1: 3}}, c: {x: {1: 2}}}, {}, {b: 'add'});
+        const [a, b, c] = tracks.get(target)!.x!;
+        expect(b!.composite).toBe('add');
+        expect(keyframesOf(b!)).toEqual([[0, 3], [0.5, 3], [1, 3]]);
+        expect(keyframesOf(c!)).toEqual(closeTo([[0, 0.75], [1, 2]]));
+        expect(a!.composite).toBe('replace');
+    });
+
+    it("keeps an earlier effect that lies within a later one that adds to it", () => {
+        const sequence = Sequence.builder()
+            .add('a', AnimationDefinition.of(eased(0.5)), 0.25)
+            .add('b', AnimationDefinition.of(eased(1)), 0)
+            .build();
+        expect(sequenceTracksOf(sequence, {a: {x: line.x}, b: {x: line.x}}, {}, {b: 'add'}).get(target)!.x!).toHaveLength(2);
+    });
+});
+
+describe("AnimationTracksResolver values passed through", () => {
+    /** Takes any text, and resolves only plain numbers; colours have no number. */
+    const textResolver: CSSValueResolver = {...numericResolver, currentValueOf: () => 'none'};
+    const textsOf = (effect: NativeAnimationEffect) => effect.keyframes.map(({value}) => value);
+    const resolvedWith = (animation: SimpleAnimation, values: { [property: string]: { [progress: number]: string } }, allowedFill: AllowedFill = 'both') =>
+        AnimationTracksResolver.resolve(resolveTimings(animation, 1), () => [targetValuesOf(target, values, 'replace', allowedFill)], textResolver).get(target)!;
+
+    it("passes values through as text when the easing is on the effect", () => {
+        const [effect] = resolvedWith(AnimationDefinition.of(eased(1, 'easeOut')), {color: {0: 'red', 0.5: 'white', 1: 'blue'}}).color!;
+        expect(textsOf(effect!)).toEqual(['red', 'white', 'blue']);
+    });
+
+    it("passes values through when each span is one whole native easing between two stops", () => {
+        const [effect] = resolvedWith(AnimationDefinition.of(eased(1, 'easeOut'), {repeatCount: 1, repeatDelay: 0.5}), {color: {0: 'red', 1: 'blue'}}).color!;
+        expect(textsOf(effect!)).toEqual(['red', 'blue', 'blue']);
+    });
+
+    it("passes values through a reversed play whose easing needn't be split", () => {
+        const animation = AnimationDefinition.of(eased(1, 'easeOut'), {repeatCount: 1, repeatDelay: 0.5, repeatMode: 'reverse'});
+        const [effect] = resolvedWith(animation, {color: {0: 'red', 1: 'blue'}}).color!;
+        expect(textsOf(effect!)).toEqual(['red', 'blue', 'blue', 'red']);
+        expect(effect!.keyframes[2]!.easing).toEqual({type: 'cubic-bezier', definition: [1 - 0.58, 0, 1, 1]});
+    });
+
+    it("passes values through an overshooting Bézier between two stops in a repeat", () => {
+        const animation = AnimationDefinition.of(eased(1, [0.3, 1.6, 0.6, 1]), {repeatCount: 1, repeatDelay: 0.5, repeatMode: 'mirror'});
+        const [effect] = resolvedWith(animation, {color: {0: 'red', 1: 'blue'}}).color!;
+        expect(textsOf(effect!)).toEqual(['red', 'blue', 'blue', 'red']);
+    });
+
+    it("starts from the current value as it is", () => {
+        const [effect] = resolvedWith(AnimationDefinition.of(eased(1)), {translate: {1: '10px'}}).translate!;
+        expect(textsOf(effect!)).toEqual(['none', '10px']);
+    });
+
+    it("starts an entry from the stop the track holds as it starts", () => {
+        const sequence = Sequence.builder()
+            .add('a', AnimationDefinition.of(eased(1)))
+            .add('b', AnimationDefinition.of(eased(1)), '+0.5')
+            .build();
+        const valuesByPath = new Map([['a', [targetValuesOf(target, {color: {0: 'red', 1: 'blue'}})]], ['b', [targetValuesOf(target, {color: {1: 'green'}})]]]);
+        const timings = resolveTimings(sequence, new Map([['a', 1], ['b', 1]]));
+        const [, b] = AnimationTracksResolver.resolve(timings, path => valuesByPath.get(path)!, textResolver).get(target)!.color!;
+        expect(textsOf(b!)).toEqual(['blue', 'green']);
+    });
+
+    it("needs numbers for a spring", () => {
+        expect(() => resolvedWith(AnimationDefinition.of(spring({duration: 1, bounce: 0.3})), {color: {0: 'red', 1: 'blue'}})).toThrow();
+        const [effect] = resolvedWith(AnimationDefinition.of(spring({duration: 1, bounce: 0.3})), {x: {0: '0', 1: '1'}}).x!;
+        expect(effect!.keyframes.length).toBeGreaterThan(2);
+    });
+
+    it("keeps only the fills the mapping allows", () => {
+        expect(resolvedWith(AnimationDefinition.of(eased(1)), {x: {0: '0', 1: '1'}}, 'backwards').x![0]!.fill).toBe('backwards');
+        expect(resolvedWith(AnimationDefinition.of(eased(1)), {x: {0: '0', 1: '1'}}, 'none').x![0]!.fill).toBe('none');
     });
 });
 
@@ -410,6 +588,6 @@ describe("EasingFunction windows", () => {
     it("gives the progress of the window without rescaling it, and runs it backwards when reversed", () => {
         const easing = linear.windowed(0.25, 0.75);
         expect([easing.progressAt(0), easing.progressAt(1), easing.reversed().progressAt(0)]).toEqual([0.25, 0.75, 0.75]);
-        expect(easing.inverseAt(0.5)).toEqual([0.5]);
+        expect(easing.offsetsAt(0.5)).toEqual([0.5]);
     });
 });

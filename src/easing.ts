@@ -1,37 +1,47 @@
 import {CubicBezier} from "./cubic-bezier.js";
 import type {DampedSpring} from "./damped-spring.js";
 import type {Progress, Seconds} from "./types.js";
-import {invLerp, lerp, solveMonotone} from "./utils.js";
+import {invLerp, lerp, solveMonotone} from "./utils/math.js";
 
 export type CubicBezierDefinition = readonly [x1: number, y1: number, x2: number, y2: number];
 export type StepPosition = 'jumpStart' | 'jumpEnd' | 'jumpNone' | 'jumpBoth';
 export type StepsDefinition = readonly [count: number, position?: StepPosition];
 export type Easing = 'linear' | 'ease' | 'easeIn' | 'easeOut' | 'easeInOut' | CubicBezierDefinition | StepsDefinition;
 
+/** As in CSS `cubic-bezier()`. */
+export function cubicBezier(x1: number, y1: number, x2: number, y2: number): CubicBezierDefinition {
+    return [x1, y1, x2, y2];
+}
+
+/** As in CSS `steps()`, jumping at the end unless told otherwise. */
+export function steps(count: number, position?: StepPosition): StepsDefinition {
+    return position ? [count, position] : [count];
+}
+
 /** How far outside the window an offset found by solving may land and still count as inside it. */
 const offsetTolerance = 1e-9;
 
 /**
- * An easing's progress over its input time, 0–1, within the window from `t0` to `t1`; the window runs backwards when `t1` comes first.
+ * An easing's progress over its input time, 0–1, within a window of it, which runs backwards when its end comes before its start.
  * Offsets are fractions of the window, and the progress isn't rescaled to it.
  */
 export abstract class EasingFunction {
-    constructor(readonly t0: number = 0, readonly t1: number = 1) {}
+    constructor(readonly windowStart: number = 0, readonly windowEnd: number = 1) {}
 
     protected abstract progressAtInput(input: number): Progress;
     /** The inputs strictly between 0 and 1 at which the progress turns back. */
     protected abstract turningInputs(): number[];
     /** The inputs at which the progress reaches `progress`. */
     protected abstract inputsAt(progress: Progress): number[];
-    protected abstract withWindow(t0: number, t1: number): EasingFunction;
+    protected abstract withWindow(windowStart: number, windowEnd: number): EasingFunction;
 
     /** Whether the window is the whole easing, forwards. */
     get isWhole(): boolean {
-        return this.t0 === 0 && this.t1 === 1;
+        return this.windowStart === 0 && this.windowEnd === 1;
     }
 
     progressAt(offset: number): Progress {
-        return this.progressAtInput(lerp(this.t0, this.t1, offset));
+        return this.progressAtInput(lerp(this.windowStart, this.windowEnd, offset));
     }
 
     /** The progress the window starts from, before any jump right at its start. */
@@ -50,7 +60,7 @@ export abstract class EasingFunction {
     }
 
     /** The offsets in the window at which the progress reaches `progress`, in order. */
-    inverseAt(progress: Progress): number[] {
+    offsetsAt(progress: Progress): number[] {
         return this.offsetsOf(this.inputsAt(progress))
             .filter(offset => offset >= -offsetTolerance && offset <= 1 + offsetTolerance)
             .map(offset => Math.min(Math.max(offset, 0), 1));
@@ -58,16 +68,16 @@ export abstract class EasingFunction {
 
     /** The part of the window between the two offsets, which runs backwards when `endOffset` comes first. */
     windowed(startOffset: number, endOffset: number): this {
-        return this.withWindow(lerp(this.t0, this.t1, startOffset), lerp(this.t0, this.t1, endOffset)) as this;
+        return this.withWindow(lerp(this.windowStart, this.windowEnd, startOffset), lerp(this.windowStart, this.windowEnd, endOffset)) as this;
     }
 
     /** The window run backwards. */
     reversed(): this {
-        return this.withWindow(this.t1, this.t0) as this;
+        return this.withWindow(this.windowEnd, this.windowStart) as this;
     }
 
     protected offsetsOf(inputs: readonly number[]): number[] {
-        return inputs.map(input => invLerp(input, this.t0, this.t1)).sort((first, second) => first - second);
+        return inputs.map(input => invLerp(input, this.windowStart, this.windowEnd)).sort((first, second) => first - second);
     }
 }
 
@@ -84,8 +94,8 @@ export class LinearEasing extends EasingFunction {
         return [progress];
     }
 
-    protected withWindow(t0: number, t1: number): LinearEasing {
-        return new LinearEasing(t0, t1);
+    protected withWindow(windowStart: number, windowEnd: number): LinearEasing {
+        return new LinearEasing(windowStart, windowEnd);
     }
 }
 
@@ -93,8 +103,8 @@ export class LinearEasing extends EasingFunction {
 export class CubicBezierEasing extends EasingFunction {
     readonly curve: CubicBezier;
 
-    constructor(readonly definition: CubicBezierDefinition, t0?: number, t1?: number) {
-        super(t0, t1);
+    constructor(readonly definition: CubicBezierDefinition, windowStart?: number, windowEnd?: number) {
+        super(windowStart, windowEnd);
         const [x1, y1, x2, y2] = definition;
         if (!(x1 >= 0 && x1 <= 1 && x2 >= 0 && x2 <= 1))
             throw new RangeError(`A cubic Bézier easing's x control points must be within 0–1, not ${x1} and ${x2}.`);
@@ -117,15 +127,15 @@ export class CubicBezierEasing extends EasingFunction {
         return this.curve.parametersAt('y', progress).map(t => this.curve.coordinateAt('x', t));
     }
 
-    protected withWindow(t0: number, t1: number): CubicBezierEasing {
-        return new CubicBezierEasing(this.definition, t0, t1);
+    protected withWindow(windowStart: number, windowEnd: number): CubicBezierEasing {
+        return new CubicBezierEasing(this.definition, windowStart, windowEnd);
     }
 }
 
 /** A CSS `steps()`: the output only ever rises, in jumps. */
 export class StepsEasing extends EasingFunction {
-    constructor(readonly definition: StepsDefinition, t0?: number, t1?: number) {
-        super(t0, t1);
+    constructor(readonly definition: StepsDefinition, windowStart?: number, windowEnd?: number) {
+        super(windowStart, windowEnd);
         const [count, position = 'jumpEnd'] = definition;
         const leastCount = position === 'jumpNone' ? 2 : 1;
         if (!(Number.isInteger(count) && count >= leastCount))
@@ -159,11 +169,11 @@ export class StepsEasing extends EasingFunction {
 
     /** The output is right-continuous, so the edge the window enters from may need the output before a jump there. */
     override get startProgress(): Progress {
-        return this.t0 <= this.t1 ? this.progressBeforeInput(this.t0) : this.progressAtInput(this.t0);
+        return this.windowStart <= this.windowEnd ? this.progressBeforeInput(this.windowStart) : this.progressAtInput(this.windowStart);
     }
 
     override get endProgress(): Progress {
-        return this.t0 <= this.t1 ? this.progressAtInput(this.t1) : this.progressBeforeInput(this.t1);
+        return this.windowStart <= this.windowEnd ? this.progressAtInput(this.windowEnd) : this.progressBeforeInput(this.windowEnd);
     }
 
     protected turningInputs(): number[] {
@@ -185,8 +195,8 @@ export class StepsEasing extends EasingFunction {
         return this.offsetsOf(inputs).filter(offset => offset > offsetTolerance && offset < 1 - offsetTolerance);
     }
 
-    protected withWindow(t0: number, t1: number): StepsEasing {
-        return new StepsEasing(this.definition, t0, t1);
+    protected withWindow(windowStart: number, windowEnd: number): StepsEasing {
+        return new StepsEasing(this.definition, windowStart, windowEnd);
     }
 }
 
@@ -197,8 +207,8 @@ export class SpringEasing extends EasingFunction {
     private readonly closingStart: Seconds;
     private readonly closingGap: Progress;
 
-    constructor(readonly spring: DampedSpring, readonly duration: Seconds, t0?: number, t1?: number) {
-        super(t0, t1);
+    constructor(readonly spring: DampedSpring, readonly duration: Seconds, windowStart?: number, windowEnd?: number) {
+        super(windowStart, windowEnd);
         this.turningTimes = spring.turningTimes(duration);
         this.closingStart = this.turningTimes.at(-1) ?? 0;
         this.closingGap = 1 - spring.positionAt(duration);
@@ -237,8 +247,8 @@ export class SpringEasing extends EasingFunction {
         });
     }
 
-    protected withWindow(t0: number, t1: number): SpringEasing {
-        return new SpringEasing(this.spring, this.duration, t0, t1);
+    protected withWindow(windowStart: number, windowEnd: number): SpringEasing {
+        return new SpringEasing(this.spring, this.duration, windowStart, windowEnd);
     }
 }
 

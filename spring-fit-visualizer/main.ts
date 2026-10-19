@@ -2,10 +2,11 @@ import {AnimationDefinition} from "../src/animation.js";
 import {CubicBezierEasing, type SpringEasing} from "../src/easing.js";
 import {progressPrecision, type SpringTransition} from "../src/transition.js";
 import type {Seconds} from "../src/types.js";
-import {invLerp, lerp} from "../src/utils.js";
+import {invLerp, lerp} from "../src/utils/math.js";
 import type {NativeKeyframe} from "../src/waapi/native-effects.js";
 import {cssEasingOf, type NativeEasing} from "../src/waapi/native-easing.js";
 import {SpringSplineFitter} from "../src/waapi/spring-fit.js";
+import {plainNumberResolver} from "../src/waapi/effect-chains.js";
 import {PropertyStops} from "../src/waapi/stops.js";
 import {resolveTimings} from "../src/waapi/timings.js";
 import {AnimationTracksResolver} from "../src/waapi/tracks.js";
@@ -118,7 +119,7 @@ function fittedProgressAt(keyframes: readonly NativeKeyframe[], duration: Second
         const to = keyframes[index]!;
         const localOffset = to.offset > from.offset ? invLerp(offset, from.offset, to.offset) : 1;
         const easedProgress = curves[index - 1]?.progressAt(localOffset) ?? localOffset;
-        return lerp(from.value, to.value, easedProgress);
+        return lerp(Number(from.value), Number(to.value), easedProgress);
     };
 }
 
@@ -129,8 +130,8 @@ function render(): void {
         const easing = animation.easing as SpringEasing;
         const {spring, duration} = easing;
         const target = document.createElement('div');
-        const targetValues = [{target, properties: {progress: {stops: PropertyStops.of('progress', {0: 0, 1: 1}), unit: ''}}}];
-        const [effect] = AnimationTracksResolver.resolve(resolveTimings(animation, 1), () => targetValues).get(target)!.progress!;
+        const targetValues = [{target, properties: {progress: {stops: PropertyStops.of('progress', {0: 0, 1: 1}), composite: 'replace' as const, allowedFill: 'both' as const}}}];
+        const [effect] = AnimationTracksResolver.resolve(resolveTimings(animation, 1), () => targetValues, plainNumberResolver).get(target)!.progress!;
         const {keyframes} = effect!;
         playableFit = {keyframes, easing: effect!.easing, duration};
         const fitAt = fittedProgressAt(keyframes, duration);
@@ -173,7 +174,7 @@ function playBall(): void {
     ballPlayback = ball.animate(
         keyframes.map(({offset, value, easing}) => ({
             offset,
-            transform: `translateX(${value * travel}px)`,
+            transform: `translateX(${Number(value) * travel}px)`,
             ...(easing && {easing: cssEasingOf(easing)})
         })),
         {duration: duration * 1000, easing: cssEasingOf(easing), fill: 'forwards'}

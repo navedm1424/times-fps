@@ -7,7 +7,7 @@ export type Transition = EasedTransition | SpringTransition;
 // /** Duration comes from the animation's ratio, so only transitions shaped by a given duration fit. */
 // export type StretchableTransition =
 //     | Omit<EasedTransition, 'duration'>
-//     | Omit<PerceptualSpringTransition, 'duration'>;
+//     | Omit<DurationSpringTransition, 'duration'>;
 
 export interface EasedTransition {
     type: 'eased';
@@ -33,7 +33,7 @@ export interface PhysicalSpringTransition {
 }
 
 /** Shaped by `bounce` and stretched so it comes to rest at the end of `duration`. */
-export interface PerceptualSpringTransition {
+export interface DurationSpringTransition {
     type: 'spring';
     duration: Seconds;
     bounce: number;            // 0 = no overshoot
@@ -48,13 +48,13 @@ export interface VisualSpringTransition {
     velocity?: number;         // progress per second
 }
 
-export type SpringTransition = PhysicalSpringTransition | PerceptualSpringTransition | VisualSpringTransition;
+export type SpringTransition = PhysicalSpringTransition | DurationSpringTransition | VisualSpringTransition;
 
 export function spring(options: Omit<PhysicalSpringTransition, 'type'>): PhysicalSpringTransition;
-export function spring(options: Omit<PerceptualSpringTransition, 'type'>): PerceptualSpringTransition;
+export function spring(options: Omit<DurationSpringTransition, 'type'>): DurationSpringTransition;
 export function spring(options: Omit<VisualSpringTransition, 'type'>): VisualSpringTransition;
 export function spring(
-    options: Omit<PhysicalSpringTransition, 'type'> | Omit<PerceptualSpringTransition, 'type'> | Omit<VisualSpringTransition, 'type'>
+    options: Omit<PhysicalSpringTransition, 'type'> | Omit<DurationSpringTransition, 'type'> | Omit<VisualSpringTransition, 'type'>
 ): SpringTransition {
     return {type: 'spring', ...options};
 }

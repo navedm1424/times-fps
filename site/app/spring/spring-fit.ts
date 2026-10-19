@@ -1,8 +1,10 @@
-import {AnimationDefinition, resolveSpring, type SpringTransition} from "timesfps";
+import {AnimationDefinition, type SpringTransition} from "timesfps";
 import {
     AnimationTracksResolver,
     type CubicBezierEasing,
+    plainNumberResolver,
     PropertyStops,
+    resolveSpring,
     resolveTimings,
     SpringEasing,
     SpringSplineFitter
@@ -60,8 +62,8 @@ export function fitSpring(transition: SpringTransition): SpringFit {
 const standInTarget = {} as Element;
 
 function keyframeCountOf(transition: SpringTransition): number {
-    const targetValues = [{target: standInTarget, properties: {progress: {stops: PropertyStops.of("progress", {0: 0, 1: 1}), unit: ""}}}];
-    const tracks = AnimationTracksResolver.resolve(resolveTimings(AnimationDefinition.of(transition), 1), () => targetValues);
+    const targetValues = [{target: standInTarget, properties: {progress: {stops: PropertyStops.of("progress", {0: 0, 1: 1}), composite: "replace" as const, allowedFill: "both" as const}}}];
+    const tracks = AnimationTracksResolver.resolve(resolveTimings(AnimationDefinition.of(transition), 1), () => targetValues, plainNumberResolver);
     return tracks.get(standInTarget)!.progress!.reduce((count, effect) => count + effect.keyframes.length, 0);
 }
 

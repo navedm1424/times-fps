@@ -1,5 +1,5 @@
-import {resolveSpring, spring, type SpringTransition} from "timesfps";
-import {progressPrecision} from "@/lib/timesfps-internals";
+import {spring, type SpringTransition} from "timesfps";
+import {progressPrecision, resolveSpring} from "@/lib/timesfps-internals";
 
 export type SpringKind = "physical" | "perceptual" | "visual";
 

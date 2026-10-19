@@ -1,5 +1,5 @@
 import {animate, createGeneratorEasing, generateLinearEasing, spring as motionSpring, type ValueTransition} from "motion";
-import {AnimationDefinition, type SpringTransition, WAAPIAdapter} from "timesfps";
+import {AnimationDefinition, animate as animateNatively, type SpringTransition} from "timesfps";
 import {physicsOf} from "./spring-parameters";
 
 export type BallId = "css" | "timesfps" | "motion";
@@ -9,8 +9,6 @@ interface BallPlayer {
     play(ball: HTMLElement, from: number, to: number, spring: SpringTransition, startTime: number): Promise<void>;
     release(ball: HTMLElement): void;
 }
-
-const adapter = new WAAPIAdapter();
 
 function cancelAnimations(ball: HTMLElement): void {
     ball.getAnimations().forEach(animation => animation.cancel());
@@ -135,9 +133,9 @@ const ballPlayers: { [Id in BallId]: BallPlayer } = {
     },
     timesfps: {
         async play(ball, from, to, spring, startTime) {
-            const animations = adapter.animate(AnimationDefinition.of(spring), {target: ball, values: {translate: {0: from, 1: to}}});
-            animations.forEach(animation => animation.startTime = startTime);
-            await Promise.all(animations.map(animation => animation.finished));
+            const controls = animateNatively(AnimationDefinition.of(spring), {target: ball, values: {translate: {0: from, 1: to}}});
+            controls.startTime = startTime / 1000;
+            await controls.finished;
         },
         release: cancelAnimations
     },
@@ -164,8 +162,7 @@ export async function playToEnd(id: BallId, ball: HTMLElement, spring: SpringTra
 
 /** Brings the balls back from the end as one animation, so they move as one; their tracks are equally wide. */
 export async function returnToStart(balls: HTMLElement[], spring: SpringTransition): Promise<void> {
-    const animations = adapter.animate(AnimationDefinition.of(spring), {target: balls, values: {translate: {0: travelOf(balls[0]!), 1: 0}}});
-    await Promise.all(animations.map(animation => animation.finished));
+    await animateNatively(AnimationDefinition.of(spring), {target: balls, values: {translate: {0: travelOf(balls[0]!), 1: 0}}}).finished;
     for (const ball of balls) {
         delete ball.dataset.position;
         cancelAnimations(ball);

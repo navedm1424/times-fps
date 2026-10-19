@@ -1,5 +1,5 @@
 import type {Progress, Seconds} from "../types.js";
-import {lerp} from "../utils.js";
+import {lerp} from "../utils/math.js";
 import {progressPrecision} from "../transition.js";
 import {CubicBezierEasing, type SpringEasing} from "../easing.js";
 

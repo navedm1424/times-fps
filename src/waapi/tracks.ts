@@ -1,13 +1,17 @@
 import {type EasingFunction, linear} from "../easing.js";
-import type {RepeatOptions, Seconds} from "../types.js";
+import type {Progress, RepeatOptions, Seconds} from "../types.js";
+import {type CSSValueResolver, resolveEffectChains} from "./effect-chains.js";
 import {type NativeAnimationEffect, nativeEffectOf} from "./native-effects.js";
-import {PropertyStops} from "./stops.js";
-import {type AnimationTimings, entryPathOf, type EntryPath, type SequenceTimings, staggeredDelays} from "./timings.js";
+import {PropertyStops, type StopValue} from "./stops.js";
+import {type AnimationTimings, entryPathOf, type EntryPath, type NodeTimings, type SequenceTimings} from "./timings.js";
 
-/** A target of an animation, with each property's stops and the unit its values are in. */
+/** Which of its fills an entry's effects may have. */
+export type AllowedFill = Exclude<FillMode, 'auto'>;
+
+/** A target of an animation, with each property's stops, how its effects composite with what's under them, and which fills they may have. */
 export interface TargetValues {
     target: Element;
-    properties: { [property: string]: { stops: PropertyStops; unit: string } };
+    properties: { [property: string]: { stops: PropertyStops; composite: CompositeOperation; allowedFill: AllowedFill } };
 }
 
 /** Each target's properties, each with its effects in the order they're declared, which is the order they show over each other in. */
@@ -45,9 +49,30 @@ export class TrackRun {
         return this.spans.at(-1)!.end;
     }
 
-    get endValue(): number {
+    /** The value of the stop the run ends on, which is the end of its last span's easing window. */
+    get endValue(): StopValue {
         const {easing, stops} = this.spans.at(-1)!;
-        return stops.valueAt(easing.endProgress);
+        return stops.valueOfStopAt(easing.windowEnd);
+    }
+
+    /** The value at `time`, which is the next span's start where two meet; the stops must be resolved. */
+    valueAt(time: Seconds): number {
+        const {stops, progress} = this.progressAt(time);
+        return stops.valueAt(progress);
+    }
+
+    /** The value at `time` when it's exactly a stop's, as it is at a whole span's ends and through a hold. */
+    stopValueAt(time: Seconds): StopValue | undefined {
+        const {stops, progress} = this.progressAt(time);
+        return stops.stopValueAt(progress);
+    }
+
+    private progressAt(time: Seconds): { stops: PropertyStops; progress: Progress } {
+        const span = [...this.spans].reverse().find(span => span.start <= time) ?? this.spans[0]!;
+        const {start, end, easing, stops} = span;
+        if (time >= end) return {stops, progress: easing.endProgress};
+        if (time <= start) return {stops, progress: easing.startProgress};
+        return {stops, progress: easing.progressAt((time - start) / (end - start))};
     }
 
     shifted(by: Seconds): TrackRun {
@@ -59,7 +84,7 @@ export class TrackRun {
     }
 
     /** Holds `value` from `time` until the run starts. */
-    heldFrom(time: Seconds, value: number): TrackRun {
+    heldFrom(time: Seconds, value: StopValue): TrackRun {
         return new TrackRun([...holdSpans(value, time, this.start), ...this.spans]);
     }
 
@@ -81,7 +106,7 @@ export class TrackRun {
     }
 }
 
-function holdSpans(value: number, start: Seconds, end: Seconds): TrackSpan[] {
+function holdSpans(value: StopValue, start: Seconds, end: Seconds): TrackSpan[] {
     return end > start ? [{start, end, easing: linear, stops: PropertyStops.constant(value)}] : [];
 }
 
@@ -89,7 +114,12 @@ function holdSpans(value: number, start: Seconds, end: Seconds): TrackSpan[] {
 interface TrackKey {
     target: Element;
     property: string;
-    unit: string;
+    /** The animation leaf it comes from, which is undefined for an animation on its own. */
+    path: EntryPath | undefined;
+    /** The stops its entry gives the property, before any repeat flips them. */
+    entryStops: PropertyStops;
+    composite: CompositeOperation;
+    allowedFill: AllowedFill;
     order: readonly number[];
 }
 
@@ -112,6 +142,11 @@ export interface PlacedEffect extends ScheduledEffect {
     fill: FillMode;
 }
 
+/** An effect whose values are numbers in `unit`, or pass through to WAAPI as CSS text when it has none. */
+export interface ResolvedEffect extends PlacedEffect {
+    unit: string | undefined;
+}
+
 /** What an entry puts on the tracks, in the time of the iteration of the sequence it's in. */
 interface Contribution {
     runs: KeyedRun[];
@@ -121,13 +156,13 @@ interface Contribution {
 type EffectTiming = Pick<ScheduledEffect, 'delay' | 'duration' | 'iterations' | 'direction' | 'run'>;
 
 /**
- * Resolves the timings into tracks in three stages: the repetitions, the fill conflicts, then the easings.
+ * Resolves the timings into tracks in four stages: the repetitions, the fill conflicts, the values, then the easings.
  * Only the outermost repeat runs as WAAPI iterations; the ones inside it are baked into the keyframes, except that an infinite one only gives its first iteration, and an effect continuing it from there.
  */
 export class AnimationTracksResolver {
     private constructor(private readonly valuesOf: (path: EntryPath) => readonly TargetValues[]) {}
 
-    static resolve(timings: AnimationTimings | SequenceTimings, valuesOf: (path: EntryPath) => readonly TargetValues[]): AnimationTracks {
+    static resolve(timings: NodeTimings, valuesOf: (path: EntryPath) => readonly TargetValues[], valueResolver: CSSValueResolver): AnimationTracks {
         const {effects} = new AnimationTracksResolver(valuesOf).resolveRepetitions(timings, undefined, [], false);
 
         const effectsByTrack = new Map<Element, Map<string, ScheduledEffect[]>>();
@@ -142,39 +177,39 @@ export class AnimationTracksResolver {
         return new Map([...effectsByTrack].map(([target, effectsByProperty]) => [target, Object.fromEntries(
             [...effectsByProperty].map(([property, trackEffects]) => {
                 const declared = trackEffects.sort((first, second) => compareOrders(first.order, second.order));
-                return [property, AnimationTracksResolver.resolveFills(declared).map(nativeEffectOf)];
+                const placed = AnimationTracksResolver.resolveFills(declared);
+                return [property, resolveEffectChains(target, property, placed, valueResolver).map(nativeEffectOf)];
             })
         )]));
     }
 
-    private resolveRepetitions(
-        timings: AnimationTimings | SequenceTimings,
-        path: EntryPath | undefined,
-        order: readonly number[],
-        repeatingAncestor: boolean
-    ): Contribution {
-        return timings.type === 'animation'
-            ? this.resolveAnimationRepetitions(timings, path, order, repeatingAncestor)
-            : this.resolveSequenceRepetitions(timings, path, order, repeatingAncestor);
+    private resolveRepetitions(timings: NodeTimings, path: EntryPath | undefined, order: readonly number[], repeatingAncestor: boolean): Contribution {
+        switch (timings.type) {
+            case 'animation':
+                return this.resolveAnimationRepetitions(timings, path, order, repeatingAncestor);
+            case 'sequence':
+                return this.resolveSequenceRepetitions(timings, path, order, repeatingAncestor);
+            case 'staggered-sequence': {
+                const lanes = timings.lanes.map(lane => this.resolveSequenceRepetitions(lane, path, order, repeatingAncestor));
+                return {runs: lanes.flatMap(({runs}) => runs), effects: lanes.flatMap(({effects}) => effects)};
+            }
+        }
     }
 
     private resolveAnimationRepetitions(timings: AnimationTimings, path: EntryPath | undefined, order: readonly number[], repeatingAncestor: boolean): Contribution {
         const contribution: Contribution = {runs: [], effects: []};
-        if (timings.playDuration === 0) return contribution;
-
         const {animation, playDuration} = timings;
         const values = this.valuesOf(path ?? '');
-        const position = timings.firstStart - timings.shortestDelay;
-        const delays = staggeredDelays(timings.delay, values.length);
-        values.forEach(({target, properties}, index) => {
-            const runs = Object.entries(properties).map(([property, {stops, unit}]): KeyedRun =>
-                ({target, property, unit, order, run: TrackRun.play(playDuration, animation.easing, stops)})
+        for (const {index, start} of timings.targets) {
+            const {target, properties} = values[index]!;
+            const runs = Object.entries(properties).map(([property, {stops, composite, allowedFill}]): KeyedRun =>
+                ({target, property, path, entryStops: stops, composite, allowedFill, order, run: TrackRun.play(playDuration, animation.easing, stops)})
             );
             const repeated = AnimationTracksResolver.repeated({runs, effects: []}, playDuration, animation.options, repeatingAncestor, order.length);
-            const placed = AnimationTracksResolver.shifted(repeated, position + delays[index]!);
+            const placed = AnimationTracksResolver.shifted(repeated, start);
             contribution.runs.push(...placed.runs);
             contribution.effects.push(...placed.effects);
-        });
+        }
         return contribution;
     }
 
@@ -224,19 +259,21 @@ export class AnimationTracksResolver {
     }
 
     /**
-     * Effects that are declared earlier and lie within a later one never show, so they're dropped.
+     * Effects that are declared earlier and lie within a later one that replaces what's under it never show, so they're dropped.
      * Only the ones that start first fill backwards, and an effect fills forwards unless one declared before it runs on after it ends.
+     * Either way, an effect only has the fills its entry allows.
      */
     private static resolveFills(effects: readonly ScheduledEffect[]): PlacedEffect[] {
-        const endOf = ({delay, duration, iterations}: ScheduledEffect) => delay + duration * iterations;
+        const endOf = ({delay, duration, iterations}: ScheduledEffect) => delay + (duration === 0 ? 0 : duration * iterations);
         const shown = effects.filter((effect, index) => !effects.some((later, laterIndex) =>
-            laterIndex > index && later.delay <= effect.delay && endOf(effect) <= endOf(later)
+            laterIndex > index && later.composite === 'replace' && later.delay <= effect.delay && endOf(effect) <= endOf(later)
         ));
 
         const firstStart = Math.min(...shown.map(({delay}) => delay));
         return shown.map((effect, index) => {
-            const backwards = effect.delay === firstStart;
-            const forwards = !shown.slice(0, index).some(earlier => endOf(earlier) > endOf(effect));
+            const backwards = effect.delay === firstStart && (effect.allowedFill === 'backwards' || effect.allowedFill === 'both');
+            const forwards = !shown.slice(0, index).some(earlier => endOf(earlier) > endOf(effect))
+                && (effect.allowedFill === 'forwards' || effect.allowedFill === 'both');
             const fill: FillMode = backwards && forwards ? 'both' : backwards ? 'backwards' : forwards ? 'forwards' : 'none';
             return {...effect, fill};
         });

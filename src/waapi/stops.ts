@@ -1,21 +1,57 @@
 import type {Progress} from "../types.js";
-import {remap, sortedByKey} from "../utils.js";
+import {remap} from "../utils/math.js";
+import {sortedByKey} from "../utils/records.js";
 
-export type RawValueStops = {
+export type NumericValueStops = {
     [progress: number]: number;
 };
 
-interface ValueStop {
-    progress: Progress;
-    value: number;
+/**
+ * A property's value at a stop: its CSS text, and its number once its track's unit is known.
+ * A missing 0 isn't given: it adopts the text of the value the track has as the entry starts, or only gets a number when the track is between stops then.
+ */
+export class StopValue {
+    readonly given: boolean;
+    #text: string | undefined;
+    #number: number | undefined;
+
+    constructor(text: string | undefined) {
+        this.given = text !== undefined;
+        this.#text = text;
+    }
+
+    get text(): string | undefined {
+        return this.#text;
+    }
+
+    get number(): number {
+        if (this.#number === undefined) throw new Error(`The value "${this.#text ?? "at the start"}" hasn't been resolved yet.`);
+        return this.#number;
+    }
+
+    adopt(text: string): void {
+        this.#text = text;
+    }
+
+    resolve(number: number): void {
+        this.#number = number;
+    }
 }
 
-/** One property's values along the change, sorted by progress, with the closest value filling in a missing end. */
+interface ValueStop {
+    progress: Progress;
+    value: StopValue;
+}
+
+/**
+ * One property's values along the change, sorted by progress.
+ * A missing 0 is the value the track has as the entry starts, or the first given value for an entry that adds to what's under it; a missing 1 is the last given value.
+ */
 export class PropertyStops {
     private constructor(readonly stops: readonly ValueStop[]) {}
 
-    static of(property: string, valueStops: RawValueStops): PropertyStops {
-        const stops = sortedByKey(valueStops).map(([progress, value]) => ({progress, value}));
+    static of(property: string, valueStops: { [progress: number]: string | number }, composite: CompositeOperation = 'replace'): PropertyStops {
+        const stops = sortedByKey(valueStops).map(([progress, value]) => ({progress, value: new StopValue(String(value))}));
         const first = stops[0];
         const last = stops.at(-1);
         if (!first || !last) throw new Error(`"${property}" has no values.`);
@@ -25,23 +61,46 @@ export class PropertyStops {
                 throw new RangeError(`"${property}" has a value at ${progress}, outside the 0–1 range.`);
         }
 
-        if (first.progress !== 0) stops.unshift({progress: 0, value: first.value});
+        if (first.progress !== 0) stops.unshift({progress: 0, value: composite === 'replace' ? new StopValue(undefined) : first.value});
         if (last.progress !== 1) stops.push({progress: 1, value: last.value});
         return new PropertyStops(stops);
     }
 
     /** The value throughout. */
-    static constant(value: number): PropertyStops {
+    static constant(value: StopValue): PropertyStops {
         return new PropertyStops([{progress: 0, value}, {progress: 1, value}]);
+    }
+
+    get startValue(): StopValue {
+        return this.stops[0]!.value;
+    }
+
+    /** Each value once, in order. */
+    get values(): StopValue[] {
+        return [...new Set(this.stops.map(({value}) => value))];
+    }
+
+    /** The value of the stop at exactly the progress. */
+    valueOfStopAt(progress: Progress): StopValue {
+        const value = this.stopValueAt(progress);
+        if (!value) throw new Error(`There's no stop at ${progress}.`);
+        return value;
+    }
+
+    /** The value at the progress when it's exactly a stop's, as it is anywhere along constant stops. */
+    stopValueAt(progress: Progress): StopValue | undefined {
+        const [value, ...otherValues] = this.values;
+        if (otherValues.length === 0) return value;
+        return this.stops.find(stop => stop.progress === progress)?.value;
     }
 
     /** The stop's own value at a stop; linear between the surrounding stops; past either end, it continues the nearest segment, as a spring overshoots. */
     valueAt(progress: Progress): number {
         const stop = this.stops.find(stop => stop.progress === progress);
-        if (stop) return stop.value;
+        if (stop) return stop.value.number;
 
         const {start, end} = this.surroundingStops(progress);
-        return remap(progress, start.progress, end.progress, start.value, end.value);
+        return remap(progress, start.progress, end.progress, start.value.number, end.value.number);
     }
 
     /** The stops on either side of the progress; past either end, the nearest pair. */
