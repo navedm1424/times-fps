@@ -29,16 +29,16 @@ export class StopValue {
         return this.#number;
     }
 
-    adopt(text: string): void {
+    adoptText(text: string): void {
         this.#text = text;
     }
 
-    resolve(number: number): void {
+    assignNumber(number: number): void {
         this.#number = number;
     }
 }
 
-interface ValueStop {
+interface Stop {
     progress: Progress;
     value: StopValue;
 }
@@ -48,7 +48,7 @@ interface ValueStop {
  * A missing 0 is the value the track has as the entry starts, or the first given value for an entry that adds to what's under it; a missing 1 is the last given value.
  */
 export class PropertyStops {
-    private constructor(readonly stops: readonly ValueStop[]) {}
+    private constructor(readonly stops: readonly Stop[]) {}
 
     static of(property: string, valueStops: { [progress: number]: string | number }, composite: CompositeOperation = 'replace'): PropertyStops {
         const stops = sortedByKey(valueStops).map(([progress, value]) => ({progress, value: new StopValue(String(value))}));
@@ -104,7 +104,7 @@ export class PropertyStops {
     }
 
     /** The stops on either side of the progress; past either end, the nearest pair. */
-    private surroundingStops(progress: Progress): { start: ValueStop; end: ValueStop } {
+    private surroundingStops(progress: Progress): { start: Stop; end: Stop } {
         const {stops} = this;
         const nextIndex = stops.findIndex(stop => stop.progress > progress);
         const endIndex = nextIndex === -1 ? stops.length - 1 : Math.max(nextIndex, 1);
@@ -112,7 +112,7 @@ export class PropertyStops {
     }
 
     /** The stops strictly between the two, in either order. */
-    stopsBetween(fromProgress: Progress, toProgress: Progress): ValueStop[] {
+    stopsBetween(fromProgress: Progress, toProgress: Progress): Stop[] {
         const lowest = Math.min(fromProgress, toProgress);
         const highest = Math.max(fromProgress, toProgress);
         return this.stops.filter(({progress}) => progress > lowest && progress < highest);

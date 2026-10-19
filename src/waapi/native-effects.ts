@@ -1,14 +1,15 @@
 import type {CubicBezier} from "../cubic-bezier.js";
-import {type CubicBezierDefinition, CubicBezierEasing, type EasingFunction, LinearEasing, linear, SpringEasing, StepsEasing} from "../easing.js";
+import {CubicBezierEasing, type CubicBezierEasingDescriptor, type EasingFunction, LinearEasing, linear, SpringEasing, StepsEasing} from "../easing.js";
 import type {DampedSpring} from "../damped-spring.js";
+import type {PropertyStops, StopValue} from "../resolution/stops.js";
+import type {EntryPath} from "../resolution/timings.js";
+import type {TrackRun, TrackSpan} from "../resolution/track-runs.js";
 import type {Progress, Seconds} from "../types.js";
 import {invLerp, lerp} from "../utils/math.js";
 import {sortedByKey} from "../utils/records.js";
 import type {LinearPoint, NativeEasing} from "./native-easing.js";
 import {type Spline, SpringSplineFitter} from "./spring-fit.js";
-import type {PropertyStops, StopValue} from "./stops.js";
-import type {EntryPath} from "./timings.js";
-import type {PlacedEffect, ResolvedEffect, TrackRun, TrackSpan} from "./tracks.js";
+import type {PlacedEffect, ResolvedEffect} from "./tracks.js";
 
 /** `easing` leads to the next keyframe; without one, it's linear. The value is CSS text. */
 export interface NativeKeyframe {
@@ -298,7 +299,7 @@ function cubicBezierPiecesOf(easing: CubicBezierEasing): NativePiece[] {
 interface StretchedPiece {
     offset: number;
     progress: Progress;
-    definition: CubicBezierDefinition;
+    definition: CubicBezierEasingDescriptor;
 }
 
 /**
@@ -326,7 +327,7 @@ function isWithinTime(x: number): boolean {
 }
 
 /** The control points of the curve stretched to run from (0, 0) to (1, 1). */
-function stretchedDefinitionOf(curve: CubicBezier): CubicBezierDefinition {
+function stretchedDefinitionOf(curve: CubicBezier): CubicBezierEasingDescriptor {
     const {start, end} = curve;
     const stretch = ({x, y}: { x: number; y: number }) => [invLerp(x, start.x, end.x), invLerp(y, start.y, end.y)] as const;
     return [...stretch(curve.control1), ...stretch(curve.control2)];

@@ -277,7 +277,7 @@ animate(pulse, {
 
 `composite` sets how the values combine with what's under them: `'replace'`, the default, `'add'` or `'accumulate'`, as in WAAPI.
 
-`fill` takes away fills the entry would otherwise have (see Overlaps). It's `'none'`, `'backwards'`, `'forwards'` or `'both'`, which keeps them all and is the default. With `'none'`, the entry stops showing once it ends, and whatever is under it shows again.
+`fill` is whether the entry holds its start values before it starts and its end values after it ends, as in WAAPI: `'none'`, `'backwards'`, `'forwards'` or `'both'`. It overrides what the entry would otherwise hold (see Overlaps), which is what it holds without one. With `'none'`, the entry stops showing once it ends, and whatever is under it shows again. With `'backwards'`, it holds its start values even while an earlier entry runs.
 
 `MappingOf<typeof definition>` is the type of a definition's mapping, for writing one apart from the `animate` call.
 
@@ -349,7 +349,7 @@ animate(fadeUp, {target: '.card', values: {'--y': {0: '20px', 1: '0px'}}});
 
 ### Overlaps
 
-When entries animate the same property of the same element, the one declared later shows over the earlier one while it runs. An earlier entry that falls entirely within a later one is dropped, unless the later one adds to it. Only the entry that starts first holds its start values before it starts. An entry holds its end values after it ends, unless one declared before it is still running. A mapping's `fill` can take either away.
+When entries animate the same property of the same element, the one declared later shows over the earlier one while it runs. An earlier entry that falls entirely within a later one is dropped, unless the later one adds to it. Only the entry that starts first holds its start values before it starts. An entry holds its end values after it ends, unless one declared before it is still running. A mapping's `fill` overrides both.
 
 <br/><br/>
 

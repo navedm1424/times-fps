@@ -1,7 +1,7 @@
 import type {SimpleAnimation} from "../animation.js";
+import type {AtAnchor, ParsedAt} from "../at.js";
 import {Sequence} from "../sequence.js";
 import type {RepeatOptions, Seconds, Stagger} from "../types.js";
-import type {EntryReferences, ParsedAt} from "../utils/positions.js";
 import {checkNumber} from "../utils/validation.js";
 
 /** An animation leaf's key in a sequence: the names of the entries leading to it, joined by `>`. */
@@ -10,6 +10,9 @@ export type EntryPath = string;
 export function entryPathOf(parentPath: EntryPath | undefined, name: string): EntryPath {
     return parentPath ? `${parentPath}>${name}` : name;
 }
+
+/** Sequence-local times an entry's `at` can refer to. */
+type EntryReferences = { [Anchor in AtAnchor]: Seconds };
 
 /**
  * One copy of a staggered sequence: the copy at `index` plays the target at that index of each of its animations.
@@ -64,9 +67,9 @@ export interface StaggeredSequenceTimings extends EntryReach {
 
 export type NodeTimings = AnimationTimings | SequenceTimings | StaggeredSequenceTimings;
 
-export function resolveTimings(animation: SimpleAnimation, targetCount: number): AnimationTimings;
-export function resolveTimings(sequence: Sequence, targetCounts: ReadonlyMap<EntryPath, number>): SequenceTimings | StaggeredSequenceTimings;
-export function resolveTimings(
+export function computeTimings(animation: SimpleAnimation, targetCount: number): AnimationTimings;
+export function computeTimings(sequence: Sequence, targetCounts: ReadonlyMap<EntryPath, number>): SequenceTimings | StaggeredSequenceTimings;
+export function computeTimings(
     definition: SimpleAnimation | Sequence,
     targetCounts: number | ReadonlyMap<EntryPath, number>
 ): NodeTimings {
@@ -132,10 +135,8 @@ function sequenceTimings(
         let timings: NodeTimings;
         if ('sequence' in entry)
             timings = sequenceTimings(entry.sequence, entryPosition, entryPath, targetCounts, lane);
-        else if (entry.animation.type === 'simple')
-            timings = animationTimings(entry.animation, entryPosition, entryPath, targetCountOf(entryPath, targetCounts), lane);
         else
-            throw new Error(`Entry "${entryPath}" is a timed tween animation, which isn't supported yet.`);
+            timings = animationTimings(entry.animation, entryPosition, entryPath, targetCountOf(entryPath, targetCounts), lane);
 
         entries.set(name, timings);
         references.set(name, lastReferences = {start: timings.firstStart, end: timings.lastReferenceableEnd});

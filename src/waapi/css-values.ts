@@ -1,8 +1,8 @@
+import {PropertyStops} from "../resolution/stops.js";
 import {checkNumber} from "../utils/validation.js";
 import type {CSSValueResolver} from "./effect-chains.js";
-import type {CSSValue, ValueStops} from "./mapping.js";
-import {PropertyStops} from "./stops.js";
-import type {AllowedFill, TargetValues} from "./tracks.js";
+import type {AllowedFill, CSSValue, ValueStops} from "./mapping.js";
+import type {TargetValues} from "./tracks.js";
 
 /** The CSS name of a property given in camelCase; a custom property is already given by it. */
 export function cssPropertyNameOf(property: string): string {
@@ -25,7 +25,7 @@ export function resolveTargetValues(
     targets: readonly Element[],
     values: { [property: string]: ValueStops },
     composite: CompositeOperation,
-    allowedFill: AllowedFill
+    allowedFill: AllowedFill | undefined
 ): TargetValues[] {
     const textStops = Object.entries(values).map(([property, valueStops]) => {
         const type = PropertyValueType.of(cssPropertyNameOf(property));
@@ -124,7 +124,7 @@ class PropertyValueType {
         if (probes) return probes;
 
         const id = PropertyValueType.probesBySyntax.size;
-        probes = [`--times-fps-probe-${id}-a`, `--times-fps-probe-${id}-b`];
+        probes = [`--timesfps-probe-${id}-a`, `--timesfps-probe-${id}-b`];
         probes.forEach((name, index) => {
             try {
                 CSS.registerProperty({name, syntax: this.syntax, inherits: false, initialValue: this.initialValues[index]!});

@@ -1,114 +1,19 @@
-import {type EasingFunction, linear} from "../easing.js";
-import type {Progress, RepeatOptions, Seconds} from "../types.js";
+import type {PropertyStops} from "../resolution/stops.js";
+import {type AnimationTimings, entryPathOf, type EntryPath, type NodeTimings, type SequenceTimings} from "../resolution/timings.js";
+import {TrackRun} from "../resolution/track-runs.js";
+import type {RepeatOptions, Seconds} from "../types.js";
 import {type CSSValueResolver, resolveEffectChains} from "./effect-chains.js";
+import type {AllowedFill} from "./mapping.js";
 import {type NativeAnimationEffect, nativeEffectOf} from "./native-effects.js";
-import {PropertyStops, type StopValue} from "./stops.js";
-import {type AnimationTimings, entryPathOf, type EntryPath, type NodeTimings, type SequenceTimings} from "./timings.js";
 
-/** Which of its fills an entry's effects may have. */
-export type AllowedFill = Exclude<FillMode, 'auto'>;
-
-/** A target of an animation, with each property's stops, how its effects composite with what's under them, and which fills they may have. */
+/** A target of an animation, with each property's stops, how its effects composite with what's under them, and the fill its mapping gives its ends, if any. */
 export interface TargetValues {
     target: Element;
-    properties: { [property: string]: { stops: PropertyStops; composite: CompositeOperation; allowedFill: AllowedFill } };
+    properties: { [property: string]: { stops: PropertyStops; composite: CompositeOperation; allowedFill: AllowedFill | undefined } };
 }
 
 /** Each target's properties, each with its effects in the order they're declared, which is the order they show over each other in. */
 export type AnimationTracks = Map<Element, { [property: string]: NativeAnimationEffect[] }>;
-
-/** A stretch of a track whose value follows the stops through the easing. */
-export interface TrackSpan {
-    start: Seconds;
-    end: Seconds;
-    easing: EasingFunction;
-    stops: PropertyStops;
-}
-
-/** Spans laid out one after another, without gaps. */
-export class TrackRun {
-    constructor(readonly spans: readonly TrackSpan[]) {}
-
-    static play(duration: Seconds, easing: EasingFunction, stops: PropertyStops): TrackRun {
-        return new TrackRun([{start: 0, end: duration, easing, stops}]);
-    }
-
-    /** The runs one after another, each one's end value held until the next starts. */
-    static joined(runs: readonly TrackRun[]): TrackRun {
-        return new TrackRun(runs.flatMap((run, index) => {
-            const previous = runs[index - 1];
-            return previous ? [...holdSpans(previous.endValue, previous.end, run.start), ...run.spans] : run.spans;
-        }));
-    }
-
-    get start(): Seconds {
-        return this.spans[0]!.start;
-    }
-
-    get end(): Seconds {
-        return this.spans.at(-1)!.end;
-    }
-
-    /** The value of the stop the run ends on, which is the end of its last span's easing window. */
-    get endValue(): StopValue {
-        const {easing, stops} = this.spans.at(-1)!;
-        return stops.valueOfStopAt(easing.windowEnd);
-    }
-
-    /** The value at `time`, which is the next span's start where two meet; the stops must be resolved. */
-    valueAt(time: Seconds): number {
-        const {stops, progress} = this.progressAt(time);
-        return stops.valueAt(progress);
-    }
-
-    /** The value at `time` when it's exactly a stop's, as it is at a whole span's ends and through a hold. */
-    stopValueAt(time: Seconds): StopValue | undefined {
-        const {stops, progress} = this.progressAt(time);
-        return stops.stopValueAt(progress);
-    }
-
-    private progressAt(time: Seconds): { stops: PropertyStops; progress: Progress } {
-        const span = [...this.spans].reverse().find(span => span.start <= time) ?? this.spans[0]!;
-        const {start, end, easing, stops} = span;
-        if (time >= end) return {stops, progress: easing.endProgress};
-        if (time <= start) return {stops, progress: easing.startProgress};
-        return {stops, progress: easing.progressAt((time - start) / (end - start))};
-    }
-
-    shifted(by: Seconds): TrackRun {
-        return new TrackRun(this.spans.map(span => ({...span, start: span.start + by, end: span.end + by})));
-    }
-
-    heldUntil(time: Seconds): TrackRun {
-        return new TrackRun([...this.spans, ...holdSpans(this.endValue, this.end, time)]);
-    }
-
-    /** Holds `value` from `time` until the run starts. */
-    heldFrom(time: Seconds, value: StopValue): TrackRun {
-        return new TrackRun([...holdSpans(value, time, this.start), ...this.spans]);
-    }
-
-    /**
-     * The run in the iteration at `index` of a repeat whose iterations last `iterationDuration`, each starting after the previous one and the repeat delay.
-     * Every other iteration of a reverse or a mirror flips in time: a reverse runs the easing backwards, a mirror keeps it running forwards through flipped stops.
-     */
-    iteration(index: number, iterationDuration: Seconds, {repeatDelay = 0, repeatMode = 'loop'}: RepeatOptions): TrackRun {
-        const iterationStart = index * (iterationDuration + repeatDelay);
-        if (index % 2 === 0 || repeatMode === 'loop') return this.shifted(iterationStart);
-
-        const flipped = this.spans.map(({start, end, easing, stops}): TrackSpan => ({
-            start: iterationDuration - end,
-            end: iterationDuration - start,
-            easing: repeatMode === 'reverse' ? easing.reversed() : easing,
-            stops: repeatMode === 'reverse' ? stops : stops.flip()
-        }));
-        return new TrackRun(flipped.reverse()).shifted(iterationStart);
-    }
-}
-
-function holdSpans(value: StopValue, start: Seconds, end: Seconds): TrackSpan[] {
-    return end > start ? [{start, end, easing: linear, stops: PropertyStops.constant(value)}] : [];
-}
 
 /** Which target's property a run or an effect animates, and where its entry is declared, which decides what shows over what. */
 interface TrackKey {
@@ -119,7 +24,7 @@ interface TrackKey {
     /** The stops its entry gives the property, before any repeat flips them. */
     entryStops: PropertyStops;
     composite: CompositeOperation;
-    allowedFill: AllowedFill;
+    allowedFill: AllowedFill | undefined;
     order: readonly number[];
 }
 
@@ -163,7 +68,7 @@ export class AnimationTracksResolver {
     private constructor(private readonly valuesOf: (path: EntryPath) => readonly TargetValues[]) {}
 
     static resolve(timings: NodeTimings, valuesOf: (path: EntryPath) => readonly TargetValues[], valueResolver: CSSValueResolver): AnimationTracks {
-        const {effects} = new AnimationTracksResolver(valuesOf).resolveRepetitions(timings, undefined, [], false);
+        const {effects} = new AnimationTracksResolver(valuesOf).scheduleRepetitions(timings, undefined, [], false);
 
         const effectsByTrack = new Map<Element, Map<string, ScheduledEffect[]>>();
         for (const effect of effects) {
@@ -177,13 +82,13 @@ export class AnimationTracksResolver {
         return new Map([...effectsByTrack].map(([target, effectsByProperty]) => [target, Object.fromEntries(
             [...effectsByProperty].map(([property, trackEffects]) => {
                 const declared = trackEffects.sort((first, second) => compareOrders(first.order, second.order));
-                const placed = AnimationTracksResolver.resolveFills(declared);
+                const placed = AnimationTracksResolver.placeFills(declared);
                 return [property, resolveEffectChains(target, property, placed, valueResolver).map(nativeEffectOf)];
             })
         )]));
     }
 
-    private resolveRepetitions(timings: NodeTimings, path: EntryPath | undefined, order: readonly number[], repeatingAncestor: boolean): Contribution {
+    private scheduleRepetitions(timings: NodeTimings, path: EntryPath | undefined, order: readonly number[], repeatingAncestor: boolean): Contribution {
         switch (timings.type) {
             case 'animation':
                 return this.resolveAnimationRepetitions(timings, path, order, repeatingAncestor);
@@ -218,7 +123,7 @@ export class AnimationTracksResolver {
         const repeats = (options.repeatCount ?? 0) > 0;
         const children: Contribution = {runs: [], effects: []};
         [...timings.entries].forEach(([name, entryTimings], index) => {
-            const child = this.resolveRepetitions(entryTimings, entryPathOf(path, name), [...order, index], repeatingAncestor || repeats);
+            const child = this.scheduleRepetitions(entryTimings, entryPathOf(path, name), [...order, index], repeatingAncestor || repeats);
             children.runs.push(...child.runs);
             children.effects.push(...child.effects);
         });
@@ -261,9 +166,10 @@ export class AnimationTracksResolver {
     /**
      * Effects that are declared earlier and lie within a later one that replaces what's under it never show, so they're dropped.
      * Only the ones that start first fill backwards, and an effect fills forwards unless one declared before it runs on after it ends.
-     * Either way, an effect only has the fills its entry allows.
+     * A mapped fill overrides these at its entry's ends: the backwards fill of its first-starting effect, and the forwards fill of its last-ending one.
+     * The entry's other effects only keep the fills it has, so none of them shows past its ends.
      */
-    private static resolveFills(effects: readonly ScheduledEffect[]): PlacedEffect[] {
+    private static placeFills(effects: readonly ScheduledEffect[]): PlacedEffect[] {
         const endOf = ({delay, duration, iterations}: ScheduledEffect) => delay + (duration === 0 ? 0 : duration * iterations);
         const shown = effects.filter((effect, index) => !effects.some((later, laterIndex) =>
             laterIndex > index && later.composite === 'replace' && later.delay <= effect.delay && endOf(effect) <= endOf(later)
@@ -271,9 +177,13 @@ export class AnimationTracksResolver {
 
         const firstStart = Math.min(...shown.map(({delay}) => delay));
         return shown.map((effect, index) => {
-            const backwards = effect.delay === firstStart && (effect.allowedFill === 'backwards' || effect.allowedFill === 'both');
-            const forwards = !shown.slice(0, index).some(earlier => endOf(earlier) > endOf(effect))
-                && (effect.allowedFill === 'forwards' || effect.allowedFill === 'both');
+            const entryEffects = shown.filter(other => other.entryStops === effect.entryStops);
+            const startsEntry = effect.delay === Math.min(...entryEffects.map(({delay}) => delay));
+            const endsEntry = endOf(effect) === Math.max(...entryEffects.map(endOf));
+            const overrides = effect.allowedFill !== undefined;
+            const keeps = (side: 'backwards' | 'forwards') => !overrides || effect.allowedFill === side || effect.allowedFill === 'both';
+            const backwards = ((overrides && startsEntry) || effect.delay === firstStart) && keeps('backwards');
+            const forwards = ((overrides && endsEntry) || !shown.slice(0, index).some(earlier => endOf(earlier) > endOf(effect))) && keeps('forwards');
             const fill: FillMode = backwards && forwards ? 'both' : backwards ? 'backwards' : forwards ? 'forwards' : 'none';
             return {...effect, fill};
         });

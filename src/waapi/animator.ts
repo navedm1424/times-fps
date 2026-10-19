@@ -1,12 +1,11 @@
 import {AnimationDefinition, animationOf, type SimpleAnimation, type TransitionAndOptions} from "../animation.js";
-import {checkName, checkPosition, Sequence, type SequenceBuilder, type SequenceOptions} from "../sequence.js";
-import type {At, SequenceEntries} from "../types.js";
-import {parseAt} from "../utils/positions.js";
+import {type At, parseAt} from "../at.js";
+import {computeTimings, entryPathOf, type EntryPath} from "../resolution/timings.js";
+import {checkName, checkPosition, Sequence, type SequenceBuilder, type SequenceEntries, type SequenceOptions} from "../sequence.js";
 import {AnimationControls} from "./controls.js";
 import {domValueResolver, keyframePropertyOf, resolveTargetValues} from "./css-values.js";
 import {type AnimationMapping, resolveTargets, type SequenceMapping, type Target} from "./mapping.js";
 import {cssEasingOf} from "./native-easing.js";
-import {entryPathOf, type EntryPath, resolveTimings} from "./timings.js";
 import {type AnimationTracks, AnimationTracksResolver, type TargetValues} from "./tracks.js";
 
 export interface AnimateOptions {
@@ -170,14 +169,14 @@ class WAAPIAnimator {
 
     private static animationTracks(animation: SimpleAnimation, mapping: AnimationMapping, scope: Element): AnimationTracks {
         const targetValues = WAAPIAnimator.targetValuesOf(mapping, scope);
-        return AnimationTracksResolver.resolve(resolveTimings(animation, targetValues.length), () => targetValues, domValueResolver);
+        return AnimationTracksResolver.resolve(computeTimings(animation, targetValues.length), () => targetValues, domValueResolver);
     }
 
     private static sequenceTracks(sequence: Sequence, mapping: SequenceMapping, scope: Element): AnimationTracks {
         const valuesByPath = new Map<EntryPath, TargetValues[]>();
         WAAPIAnimator.resolveSequenceValues(sequence, mapping, undefined, scope, valuesByPath);
         const targetCounts = new Map([...valuesByPath].map(([path, targetValues]) => [path, targetValues.length]));
-        return AnimationTracksResolver.resolve(resolveTimings(sequence, targetCounts), path => valuesByPath.get(path)!, domValueResolver);
+        return AnimationTracksResolver.resolve(computeTimings(sequence, targetCounts), path => valuesByPath.get(path)!, domValueResolver);
     }
 
     private static resolveSequenceValues(
@@ -196,14 +195,12 @@ class WAAPIAnimator {
 
             if ('sequence' in entry)
                 WAAPIAnimator.resolveSequenceValues(entry.sequence, entryMapping as SequenceMapping, entryPath, scope, valuesByPath);
-            else if (entry.animation.type === 'simple')
-                valuesByPath.set(entryPath, WAAPIAnimator.targetValuesOf(entryMapping as AnimationMapping, scope));
             else
-                throw new Error(`Entry "${entryPath}" is a timed tween animation, which isn't supported yet.`);
+                valuesByPath.set(entryPath, WAAPIAnimator.targetValuesOf(entryMapping as AnimationMapping, scope));
         }
     }
 
-    private static targetValuesOf({target, values, composite = 'replace', fill = 'both'}: AnimationMapping, scope: Element): TargetValues[] {
+    private static targetValuesOf({target, values, composite = 'replace', fill}: AnimationMapping, scope: Element): TargetValues[] {
         return resolveTargetValues(resolveTargets(target, scope), values, composite, fill);
     }
 

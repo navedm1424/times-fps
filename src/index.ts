@@ -1,11 +1,12 @@
-export type {At, Progress, RepeatMode, RepeatOptions, Seconds, Stagger} from "./types.js";
-export type {CubicBezierDefinition, Easing, EasingFunction, StepPosition, StepsDefinition} from "./easing.js";
+export type {Progress, RepeatMode, RepeatOptions, Seconds, Stagger} from "./types.js";
+export type {At} from "./at.js";
+export type {CubicBezierEasingDescriptor, EasingDescriptor, EasingFunction, StepPosition, StepsEasingDescriptor} from "./easing.js";
 export {cubicBezier, steps} from "./easing.js";
 export type {
     DurationSpringTransition, EasedTransition, PhysicalSpringTransition, SpringTransition, Transition, VisualSpringTransition
 } from "./transition.js";
 export {eased, spring} from "./transition.js";
-export {stagger} from "./utils/stagger.js";
+export {stagger} from "./stagger.js";
 export type {AnimationOptions, SimpleAnimation, TransitionAndOptions} from "./animation.js";
 export {animation, AnimationDefinition} from "./animation.js";
 export type {SequenceBuilder, SequenceOptions} from "./sequence.js";

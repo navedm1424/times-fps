@@ -1,6 +1,6 @@
 import type {Progress, Seconds} from "../types.js";
 import {lerp} from "../utils/math.js";
-import {progressPrecision} from "../transition.js";
+import {PRECISION} from "../constants.js";
 import {CubicBezierEasing, type SpringEasing} from "../easing.js";
 
 /** Keyed by the offset at which the spring is broken; `easing` leads from the previous point. */
@@ -40,10 +40,10 @@ export class SpringSplineFitter {
         return fitter.spline;
     }
 
-    /** Halves the stretch until its easing follows the spring within `progressPrecision`. */
+    /** Halves the stretch until its easing follows the spring within `PRECISION`. */
     private fitStretch(from: SpringKnot, to: SpringKnot, depth: number): void {
         const easing = SpringSplineFitter.easingBetween(from, to);
-        if (depth < maxSplitDepth && this.errorBetween(from, to, easing) > progressPrecision) {
+        if (depth < maxSplitDepth && this.errorBetween(from, to, easing) > PRECISION) {
             const middle = this.knotAt((from.time + to.time) / 2);
             this.fitStretch(from, middle, depth + 1);
             this.fitStretch(middle, to, depth + 1);

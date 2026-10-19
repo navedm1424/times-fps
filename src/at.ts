@@ -1,11 +1,19 @@
-import type {At, Seconds} from "../types.js";
+import type {Seconds} from "./types.js";
 
-/** Sequence-local times an entry's position can refer to. */
-export type EntryReferences = { start: Seconds; end: Seconds };
+type AtOperator = '+' | '-' | '<+' | '<-';
+/**
+ * A number is absolute time.
+ * `+n` / `-n` is relative to the previous entry's last referenceable point: for an infinite repeat, the end of its first iteration.
+ * `<+n` / `<-n` is relative to the previous entry's start, and `<` alone is `<+0`; a name before the operator makes it relative to that entry instead.
+ */
+export type At<N extends string> = Seconds | '<' | `${AtOperator}${number}` | `${N}<` | `${N}${AtOperator}${number}`;
+
+/** The point of the entry an `at` is relative to. */
+export type AtAnchor = 'start' | 'end';
 
 export type ParsedAt<N extends string> =
     | { kind: 'absolute'; time: Seconds }
-    | { kind: 'relative'; reference: N | undefined; anchor: keyof EntryReferences; offset: Seconds };
+    | { kind: 'relative'; reference: N | undefined; anchor: AtAnchor; offset: Seconds };
 
 export function parseAt<N extends string>(at: At<N>): ParsedAt<N> {
     if (typeof at === 'number') return {kind: 'absolute', time: at};

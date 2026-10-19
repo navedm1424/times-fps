@@ -1,14 +1,22 @@
-import type {
-    At,
-    TimedTweenAnimationEntry,
-    NestedSequenceEntry, RepeatOptions, Seconds, Stagger,
-    SequenceEntries,
-    SequenceEntry,
-    SimpleAnimationEntry
-} from "./types.js";
 import {AnimationDefinition, animationOf, type SimpleAnimation, type TimedTweenAnimation, type TransitionAndOptions} from "./animation.js";
-import {type ParsedAt, parseAt} from "./utils/positions.js";
-import {checkNumber, clampedDelay, clampedRepeats} from "./utils/validation.js";
+import {type At, type ParsedAt, parseAt} from "./at.js";
+import {clampedDelay, clampedRepeats, type TimingOptions} from "./timing-options.js";
+import {checkNumber} from "./utils/validation.js";
+
+export interface SimpleAnimationEntry<N extends string = string> {
+    animation: SimpleAnimation;
+    at: ParsedAt<N>;
+}
+export interface NestedSequenceEntry<NS extends Sequence = Sequence, N extends string = string> {
+    sequence: NS;
+    at: ParsedAt<N>;
+}
+
+export type SequenceEntry = SimpleAnimationEntry | NestedSequenceEntry;
+
+export type SequenceEntries = {
+    readonly [name: string]: SequenceEntry;
+};
 
 export class SequenceBuilder<SE extends SequenceEntries = {}> {
     private readonly names: string[] = [];
@@ -34,7 +42,7 @@ export class SequenceBuilder<SE extends SequenceEntries = {}> {
 
     add<N extends string>(
         name: N,
-        definition: SimpleAnimation | TimedTweenAnimation<string[]> | Sequence | TransitionAndOptions,
+        definition: SimpleAnimation | Sequence | TransitionAndOptions,
         at?: At<string>
     ): SequenceBuilder<SE & { [_ in N]: SequenceEntry }> {
         if (Object.hasOwn(this.entries, name))
@@ -47,12 +55,10 @@ export class SequenceBuilder<SE extends SequenceEntries = {}> {
         const placement = {at: parsedAt};
         if (definition instanceof Sequence)
             this.entries[name] = {sequence: definition, ...placement};
-        else if (!(definition instanceof AnimationDefinition))
-            this.entries[name] = {animation: animationOf(definition), ...placement};
-        else if (definition.type === 'simple')
+        else if (definition instanceof AnimationDefinition)
             this.entries[name] = {animation: definition, ...placement};
         else
-            this.entries[name] = {animation: definition, ...placement};
+            this.entries[name] = {animation: animationOf(definition), ...placement};
 
         return this;
     }
@@ -62,9 +68,7 @@ export class SequenceBuilder<SE extends SequenceEntries = {}> {
     }
 }
 
-export interface SequenceOptions extends RepeatOptions {
-    delay?: Seconds | Stagger;
-}
+export type SequenceOptions = TimingOptions;
 
 export class Sequence<SE extends SequenceEntries = SequenceEntries> {
     readonly options: SequenceOptions;

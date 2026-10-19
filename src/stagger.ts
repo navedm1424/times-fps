@@ -1,11 +1,14 @@
-import {type Easing, resolveEasing} from "../easing.js";
-import type {Seconds, Stagger} from "../types.js";
+import {type EasingDescriptor, resolveEasing} from "./easing.js";
+import type {Seconds, Stagger} from "./types.js";
+import {checkNumber} from "./utils/validation.js";
 
 export function stagger(each: Seconds, options: {
     from?: 'first' | 'last' | 'center' | number;
-    easing?: Easing;
+    easing?: EasingDescriptor;
 } = {}): Stagger {
     const {from = 'first', easing} = options;
+    checkNumber(each, "The stagger's time between targets");
+    if (typeof from === 'number') checkNumber(from, "The stagger's origin");
     const easingFunction = easing && resolveEasing(easing);
     return (index, total) => {
         const origin = originIndex(from, total);

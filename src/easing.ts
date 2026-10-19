@@ -3,18 +3,18 @@ import type {DampedSpring} from "./damped-spring.js";
 import type {Progress, Seconds} from "./types.js";
 import {invLerp, lerp, solveMonotone} from "./utils/math.js";
 
-export type CubicBezierDefinition = readonly [x1: number, y1: number, x2: number, y2: number];
+export type CubicBezierEasingDescriptor = readonly [x1: number, y1: number, x2: number, y2: number];
 export type StepPosition = 'jumpStart' | 'jumpEnd' | 'jumpNone' | 'jumpBoth';
-export type StepsDefinition = readonly [count: number, position?: StepPosition];
-export type Easing = 'linear' | 'ease' | 'easeIn' | 'easeOut' | 'easeInOut' | CubicBezierDefinition | StepsDefinition;
+export type StepsEasingDescriptor = readonly [count: number, position?: StepPosition];
+export type EasingDescriptor = 'linear' | 'ease' | 'easeIn' | 'easeOut' | 'easeInOut' | CubicBezierEasingDescriptor | StepsEasingDescriptor;
 
 /** As in CSS `cubic-bezier()`. */
-export function cubicBezier(x1: number, y1: number, x2: number, y2: number): CubicBezierDefinition {
+export function cubicBezier(x1: number, y1: number, x2: number, y2: number): CubicBezierEasingDescriptor {
     return [x1, y1, x2, y2];
 }
 
 /** As in CSS `steps()`, jumping at the end unless told otherwise. */
-export function steps(count: number, position?: StepPosition): StepsDefinition {
+export function steps(count: number, position?: StepPosition): StepsEasingDescriptor {
     return position ? [count, position] : [count];
 }
 
@@ -103,7 +103,7 @@ export class LinearEasing extends EasingFunction {
 export class CubicBezierEasing extends EasingFunction {
     readonly curve: CubicBezier;
 
-    constructor(readonly definition: CubicBezierDefinition, windowStart?: number, windowEnd?: number) {
+    constructor(readonly definition: CubicBezierEasingDescriptor, windowStart?: number, windowEnd?: number) {
         super(windowStart, windowEnd);
         const [x1, y1, x2, y2] = definition;
         if (!(x1 >= 0 && x1 <= 1 && x2 >= 0 && x2 <= 1))
@@ -134,7 +134,7 @@ export class CubicBezierEasing extends EasingFunction {
 
 /** A CSS `steps()`: the output only ever rises, in jumps. */
 export class StepsEasing extends EasingFunction {
-    constructor(readonly definition: StepsDefinition, windowStart?: number, windowEnd?: number) {
+    constructor(readonly definition: StepsEasingDescriptor, windowStart?: number, windowEnd?: number) {
         super(windowStart, windowEnd);
         const [count, position = 'jumpEnd'] = definition;
         const leastCount = position === 'jumpNone' ? 2 : 1;
@@ -254,7 +254,7 @@ export class SpringEasing extends EasingFunction {
 
 export const linear = new LinearEasing();
 
-const presetEasings: { [Preset in Extract<Easing, string>]: EasingFunction } = {
+const presetEasings: { [Preset in Extract<EasingDescriptor, string>]: EasingFunction } = {
     linear,
     ease: CubicBezierEasing.of(0.25, 0.1, 0.25, 1),
     easeIn: CubicBezierEasing.of(0.42, 0, 1, 1),
@@ -262,7 +262,7 @@ const presetEasings: { [Preset in Extract<Easing, string>]: EasingFunction } = {
     easeInOut: CubicBezierEasing.of(0.42, 0, 0.58, 1)
 };
 
-export function resolveEasing(easing: Easing): EasingFunction {
+export function resolveEasing(easing: EasingDescriptor): EasingFunction {
     if (typeof easing === 'string') return presetEasings[easing];
     if (easing.length === 4) return new CubicBezierEasing(easing);
     return new StepsEasing(easing);

@@ -1,6 +1,8 @@
 import {DampedSpring} from "./damped-spring.js";
-import {type Easing, type EasingFunction, linear, resolveEasing, SpringEasing} from "./easing.js";
+import {type EasingDescriptor, type EasingFunction, linear, resolveEasing, SpringEasing} from "./easing.js";
+import {PRECISION} from "./constants.js";
 import type {Progress, Seconds} from "./types.js";
+import {checkNumber, checkPositive} from "./utils/validation.js";
 
 export type Transition = EasedTransition | SpringTransition;
 
@@ -12,15 +14,12 @@ export type Transition = EasedTransition | SpringTransition;
 export interface EasedTransition {
     type: 'eased';
     duration: Seconds;
-    easing?: Easing;
+    easing?: EasingDescriptor;
 }
 
-export function eased(duration: Seconds, easing?: Easing): EasedTransition {
+export function eased(duration: Seconds, easing?: EasingDescriptor): EasedTransition {
     return {type: 'eased', duration, ...(easing && {easing})};
 }
-
-/** How far from its target a spring may be to count as at rest, and how closely a curve fitted to a spring must follow it. */
-export const progressPrecision: Progress = 0.001;
 
 /** Works out its own duration. */
 export interface PhysicalSpringTransition {
@@ -29,7 +28,7 @@ export interface PhysicalSpringTransition {
     damping: number;
     mass?: number;
     velocity?: number;         // progress per second
-    restDelta?: Progress;      // defaults to `progressPrecision`
+    restDelta?: Progress;      // defaults to `PRECISION`
 }
 
 /** Shaped by `bounce` and stretched so it comes to rest at the end of `duration`. */
@@ -59,6 +58,31 @@ export function spring(
     return {type: 'spring', ...options};
 }
 
+/** Rejects what no play can run, and every spring that can't come to rest, before it reaches the spring's own checks. */
+export function checkTransition(transition: Transition, label: string): void {
+    if (transition.type === 'eased') {
+        if (checkNumber(transition.duration, `${label}'s duration`) < 0)
+            throw new RangeError(`${label}'s duration can't be negative, not ${transition.duration}.`);
+        return;
+    }
+
+    checkNumber(transition.velocity, `${label}'s velocity`);
+    if ('stiffness' in transition) {
+        checkPositive(transition.stiffness, `${label}'s stiffness`);
+        checkPositive(transition.damping, `${label}'s damping`);
+        checkPositive(transition.mass, `${label}'s mass`);
+        const {restDelta} = transition;
+        if (checkNumber(restDelta, `${label}'s rest delta`) !== undefined && !(restDelta! > 0 && restDelta! < 1))
+            throw new RangeError(`${label}'s rest delta must be between 0 and 1, not ${restDelta}.`);
+        return;
+    }
+
+    if (!(transition.bounce > -1 && transition.bounce < 1))
+        throw new RangeError(`${label}'s bounce must be between -1 and 1, not ${transition.bounce}.`);
+    if ('visualDuration' in transition) checkPositive(transition.visualDuration, `${label}'s visual duration`);
+    else checkPositive(transition.duration, `${label}'s duration`);
+}
+
 /** How long one play of the transition lasts, and the easing it runs. */
 export function resolveTransition(transition: Transition): { duration: Seconds; easing: EasingFunction } {
     if (transition.type === 'eased')
@@ -73,13 +97,13 @@ export function resolveSpring(transition: SpringTransition): { spring: DampedSpr
     const velocity = transition.velocity ?? 0;
     if ('stiffness' in transition) {
         const spring = DampedSpring.physical(transition.stiffness, transition.damping, transition.mass ?? 1, velocity);
-        return {spring, duration: spring.restTime(transition.restDelta ?? progressPrecision)};
+        return {spring, duration: spring.restTime(transition.restDelta ?? PRECISION)};
     }
 
     const dampingRatio = dampingRatioOfBounce(transition.bounce);
     if ('visualDuration' in transition) {
         const spring = new DampedSpring(2 * Math.PI / transition.visualDuration, dampingRatio, velocity);
-        return {spring, duration: spring.restTime(progressPrecision)};
+        return {spring, duration: spring.restTime(PRECISION)};
     }
     return {spring: springRestingAfter(transition.duration, dampingRatio, velocity), duration: transition.duration};
 }
@@ -97,9 +121,9 @@ const maxRestingRounds = 16;
  */
 function springRestingAfter(duration: Seconds, dampingRatio: number, velocity: number): DampedSpring {
     const naturalFrequencyFor = (naturalFrequency: number) =>
-        new DampedSpring(1, dampingRatio, velocity / naturalFrequency).restTime(progressPrecision) / duration;
+        new DampedSpring(1, dampingRatio, velocity / naturalFrequency).restTime(PRECISION) / duration;
 
-    let naturalFrequency = new DampedSpring(1, dampingRatio).restTime(progressPrecision) / duration;
+    let naturalFrequency = new DampedSpring(1, dampingRatio).restTime(PRECISION) / duration;
     for (let round = 0; round < maxRestingRounds; round++) {
         const next = naturalFrequencyFor(naturalFrequency);
         if (Math.abs(next - naturalFrequency) <= naturalFrequency * 1e-12) break;

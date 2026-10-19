@@ -1,7 +1,6 @@
 import {describe, expect, it} from "vitest";
 import {AnimationDefinition} from "../src/animation.js";
-import {Sequence} from "../src/sequence.js";
-import type {SimpleAnimationEntry} from "../src/types.js";
+import {Sequence, type SimpleAnimationEntry} from "../src/sequence.js";
 import {eased} from "../src/transition.js";
 import {type MappedSequenceBuilder, sequence} from "../src/waapi/animator.js";
 

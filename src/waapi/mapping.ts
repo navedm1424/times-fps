@@ -1,9 +1,10 @@
 import type {SimpleAnimation} from "../animation.js";
-import type {Sequence} from "../sequence.js";
-import type {NestedSequenceEntry, SequenceEntries, SimpleAnimationEntry} from "../types.js";
-import type {AllowedFill} from "./tracks.js";
+import type {NestedSequenceEntry, Sequence, SequenceEntries, SimpleAnimationEntry} from "../sequence.js";
 
 export type CSSSelector = string;
+
+/** An entry's fills at its ends, as WAAPI's `fill`. */
+export type AllowedFill = Exclude<FillMode, 'auto'>;
 
 /** Elements, or what finds them in the scope. */
 export type Target = Element | Element[] | CSSSelector | ((scope: Element) => Element | Element[]);
@@ -23,7 +24,7 @@ export type AnimationMapping = {
     };
     /** How the values combine with what's under them, which they replace by default. */
     composite?: CompositeOperation;
-    /** Which of the fills their track gives them the entry's effects keep; all of them by default. */
+    /** Whether the entry fills backwards before it starts and forwards after it ends, over the fills its track gives it; those by default. */
     fill?: AllowedFill;
 };
 

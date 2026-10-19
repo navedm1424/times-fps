@@ -1,9 +1,13 @@
 import type {EasingFunction} from "./easing.js";
-import {resolveTransition, type Transition} from "./transition.js";
-import type {RepeatOptions, Seconds, Stagger} from "./types.js";
-import {checkNumber, checkPositive, clampedDelay, clampedRepeats} from "./utils/validation.js";
+import {clampedDelay, clampedRepeats, type TimingOptions} from "./timing-options.js";
+import {checkTransition, resolveTransition, type Transition} from "./transition.js";
+import type {RepeatOptions, Seconds} from "./types.js";
+import {checkNumber} from "./utils/validation.js";
 
-/** `repeatCount` must be finite. */
+/**
+ * `repeatCount` must be finite.
+ * @internal
+ */
 export interface TimedTween<Name extends string = string> extends RepeatOptions {
     name: Name;
     transition: Transition;
@@ -16,9 +20,7 @@ export interface TimedTween<Name extends string = string> extends RepeatOptions 
 //     transition?: StretchableTransition;
 // }
 
-export interface AnimationOptions extends RepeatOptions {
-    delay?: Seconds | Stagger;
-}
+export type AnimationOptions = TimingOptions;
 
 /** A transition with the options of the animation that plays it. */
 export type TransitionAndOptions = Transition & AnimationOptions;
@@ -55,31 +57,6 @@ export function animationOf({delay, repeatCount, repeatDelay, repeatMode, ...tra
     return new SimpleAnimation(transition as Transition, options);
 }
 
-/** Rejects what no play can run, and every spring that can't come to rest, before it reaches the spring's own checks. */
-function checkTransition(transition: Transition, label: string): void {
-    if (transition.type === 'eased') {
-        if (checkNumber(transition.duration, `${label}'s duration`) < 0)
-            throw new RangeError(`${label}'s duration can't be negative, not ${transition.duration}.`);
-        return;
-    }
-
-    checkNumber(transition.velocity, `${label}'s velocity`);
-    if ('stiffness' in transition) {
-        checkPositive(transition.stiffness, `${label}'s stiffness`);
-        checkPositive(transition.damping, `${label}'s damping`);
-        checkPositive(transition.mass, `${label}'s mass`);
-        const {restDelta} = transition;
-        if (checkNumber(restDelta, `${label}'s rest delta`) !== undefined && !(restDelta! > 0 && restDelta! < 1))
-            throw new RangeError(`${label}'s rest delta must be between 0 and 1, not ${restDelta}.`);
-        return;
-    }
-
-    if (!(transition.bounce > -1 && transition.bounce < 1))
-        throw new RangeError(`${label}'s bounce must be between -1 and 1, not ${transition.bounce}.`);
-    if ('visualDuration' in transition) checkPositive(transition.visualDuration, `${label}'s visual duration`);
-    else checkPositive(transition.duration, `${label}'s duration`);
-}
-
 export class SimpleAnimation extends AnimationDefinition {
     readonly type = "simple" as const;
     /** How long one play lasts. */
@@ -108,6 +85,7 @@ export class SimpleAnimation extends AnimationDefinition {
 //     }
 // }
 
+/** @internal */
 export class TimedTweenAnimation<T extends string[]> extends AnimationDefinition {
     readonly type = "timed-tween" as const;
     readonly tweens: { readonly [I in keyof T]: TimedTween<T[I]>; };
@@ -123,5 +101,5 @@ export class TimedTweenAnimation<T extends string[]> extends AnimationDefinition
         }
         this.tweens = givenTweens.map(tween => clampedDelay(clampedRepeats(tween))) as unknown as typeof this.tweens;
     }
-    // easing?: Easing;           // compounds with each tween's easing
+    // easing?: EasingDescriptor;           // compounds with each tween's easing
 }

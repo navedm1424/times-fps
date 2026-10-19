@@ -1,6 +1,8 @@
 import {describe, expect, it} from "vitest";
 import {AnimationDefinition, type AnimationOptions, type SimpleAnimation} from "../src/animation.js";
 import {CubicBezierEasing, type EasingFunction, linear, StepsEasing} from "../src/easing.js";
+import {PropertyStops, type NumericValueStops} from "../src/resolution/stops.js";
+import {computeTimings, type EntryPath, type SequenceTimings} from "../src/resolution/timings.js";
 import {Sequence} from "../src/sequence.js";
 import {eased, spring, type Transition} from "../src/transition.js";
 import type {RepeatOptions} from "../src/types.js";
@@ -8,9 +10,8 @@ import {lerp} from "../src/utils/math.js";
 import type {NativeAnimationEffect, NativeKeyframe} from "../src/waapi/native-effects.js";
 import {cssEasingOf, type NativeEasing} from "../src/waapi/native-easing.js";
 import type {CSSValueResolver} from "../src/waapi/effect-chains.js";
-import {PropertyStops, type NumericValueStops} from "../src/waapi/stops.js";
-import {type EntryPath, resolveTimings, type SequenceTimings} from "../src/waapi/timings.js";
-import {type AllowedFill, type AnimationTracks, AnimationTracksResolver, type TargetValues} from "../src/waapi/tracks.js";
+import type {AllowedFill} from "../src/waapi/mapping.js";
+import {type AnimationTracks, AnimationTracksResolver, type TargetValues} from "../src/waapi/tracks.js";
 
 const target = {} as Element;
 const line = {x: {0: 0, 1: 1}};
@@ -26,7 +27,7 @@ function targetValuesOf(
     element: Element,
     values: { [property: string]: { [progress: number]: number | string } },
     composite: CompositeOperation = 'replace',
-    allowedFill: AllowedFill = 'both'
+    allowedFill?: AllowedFill
 ): TargetValues {
     return {
         target: element,
@@ -37,13 +38,13 @@ function targetValuesOf(
 /** The stops with their values resolved as plain numbers. */
 function resolvedStopsOf(values: NumericValueStops): PropertyStops {
     const stops = PropertyStops.of('x', values);
-    for (const value of stops.values) value.resolve(Number(value.text));
+    for (const value of stops.values) value.assignNumber(Number(value.text));
     return stops;
 }
 
 function animationTracksOf(animation: SimpleAnimation, values: { [property: string]: NumericValueStops } = line, targets = [target]): AnimationTracks {
     const targetValues = targets.map(element => targetValuesOf(element, values));
-    return AnimationTracksResolver.resolve(resolveTimings(animation, targets.length), () => targetValues, numericResolver);
+    return AnimationTracksResolver.resolve(computeTimings(animation, targets.length), () => targetValues, numericResolver);
 }
 
 function sequenceTracksOf(
@@ -56,7 +57,7 @@ function sequenceTracksOf(
         [path, (targetsByPath[path] ?? [target]).map(element => targetValuesOf(element, values, compositesByPath[path]))]
     ));
     const targetCounts = new Map([...targetValues].map(([path, values]) => [path, values.length]));
-    return AnimationTracksResolver.resolve(resolveTimings(sequence, targetCounts), path => targetValues.get(path)!, numericResolver);
+    return AnimationTracksResolver.resolve(computeTimings(sequence, targetCounts), path => targetValues.get(path)!, numericResolver);
 }
 
 function timingOf({delay, duration, iterations, direction, fill}: NativeAnimationEffect) {
@@ -139,17 +140,17 @@ function definedValueAt(easing: EasingFunction, stops: PropertyStops, playDurati
     return stops.flip().valueAt(easedProgressAt(easing, x));
 }
 
-describe("resolveTimings", () => {
+describe("computeTimings", () => {
     it("starts an animation at its shortest staggered delay and ends it after its latest", () => {
         const animation = AnimationDefinition.of(eased(1), {delay: index => 0.25 + index * 0.5, repeatCount: 1, repeatDelay: 0.5});
-        expect(resolveTimings(animation, 3)).toMatchObject({
+        expect(computeTimings(animation, 3)).toMatchObject({
             firstStart: 0.25, playDuration: 1, totalDuration: 2.5, end: 3.75, lastReferenceableEnd: 3.75
         });
     });
 
     it("leaves an infinite animation without an end, referenceable after its first play", () => {
         const animation = AnimationDefinition.of(eased(1), {delay: 0.5, repeatCount: Infinity});
-        expect(resolveTimings(animation, 1)).toMatchObject({firstStart: 0.5, end: undefined, lastReferenceableEnd: 1.5, totalDuration: Infinity});
+        expect(computeTimings(animation, 1)).toMatchObject({firstStart: 0.5, end: undefined, lastReferenceableEnd: 1.5, totalDuration: Infinity});
     });
 
     it("places entries in their sequence's iteration and repeats the iteration", () => {
@@ -158,7 +159,7 @@ describe("resolveTimings", () => {
             .add('b', AnimationDefinition.of(eased(2), {delay: 0.25}), '+0.5')
             .add('c', AnimationDefinition.of(eased(1)), 'b<+0')
             .build({delay: 1, repeatCount: 1, repeatDelay: 0.5});
-        const timings = resolveTimings(sequence, new Map([['a', 1], ['b', 1], ['c', 1]])) as SequenceTimings;
+        const timings = computeTimings(sequence, new Map([['a', 1], ['b', 1], ['c', 1]])) as SequenceTimings;
         expect(timings.entries.get('b')).toMatchObject({firstStart: 1.75, end: 3.75, lastReferenceableEnd: 3.75});
         expect(timings.entries.get('c')).toMatchObject({firstStart: 1.75, end: 2.75});
         expect(timings).toMatchObject({firstStart: 1, playDuration: 3.75, totalDuration: 8, end: 9, lastReferenceableEnd: 9});
@@ -168,7 +169,7 @@ describe("resolveTimings", () => {
         const sequence = Sequence.builder()
             .add('a', AnimationDefinition.of(eased(1), {repeatCount: Infinity}))
             .build({repeatCount: 1});
-        expect(resolveTimings(sequence, new Map([['a', 1]]))).toMatchObject({playDuration: 1, end: undefined, totalDuration: Infinity, lastReferenceableEnd: 2});
+        expect(computeTimings(sequence, new Map([['a', 1]]))).toMatchObject({playDuration: 1, end: undefined, totalDuration: Infinity, lastReferenceableEnd: 2});
     });
 });
 
@@ -522,8 +523,8 @@ describe("AnimationTracksResolver values passed through", () => {
     /** Takes any text, and resolves only plain numbers; colours have no number. */
     const textResolver: CSSValueResolver = {...numericResolver, currentValueOf: () => 'none'};
     const textsOf = (effect: NativeAnimationEffect) => effect.keyframes.map(({value}) => value);
-    const resolvedWith = (animation: SimpleAnimation, values: { [property: string]: { [progress: number]: string } }, allowedFill: AllowedFill = 'both') =>
-        AnimationTracksResolver.resolve(resolveTimings(animation, 1), () => [targetValuesOf(target, values, 'replace', allowedFill)], textResolver).get(target)!;
+    const resolvedWith = (animation: SimpleAnimation, values: { [property: string]: { [progress: number]: string } }, allowedFill?: AllowedFill) =>
+        AnimationTracksResolver.resolve(computeTimings(animation, 1), () => [targetValuesOf(target, values, 'replace', allowedFill)], textResolver).get(target)!;
 
     it("passes values through as text when the easing is on the effect", () => {
         const [effect] = resolvedWith(AnimationDefinition.of(eased(1, 'easeOut')), {color: {0: 'red', 0.5: 'white', 1: 'blue'}}).color!;
@@ -559,7 +560,7 @@ describe("AnimationTracksResolver values passed through", () => {
             .add('b', AnimationDefinition.of(eased(1)), '+0.5')
             .build();
         const valuesByPath = new Map([['a', [targetValuesOf(target, {color: {0: 'red', 1: 'blue'}})]], ['b', [targetValuesOf(target, {color: {1: 'green'}})]]]);
-        const timings = resolveTimings(sequence, new Map([['a', 1], ['b', 1]]));
+        const timings = computeTimings(sequence, new Map([['a', 1], ['b', 1]]));
         const [, b] = AnimationTracksResolver.resolve(timings, path => valuesByPath.get(path)!, textResolver).get(target)!.color!;
         expect(textsOf(b!)).toEqual(['blue', 'green']);
     });
@@ -570,9 +571,25 @@ describe("AnimationTracksResolver values passed through", () => {
         expect(effect!.keyframes.length).toBeGreaterThan(2);
     });
 
-    it("keeps only the fills the mapping allows", () => {
+    it("sets the entry's fills at its ends to the mapping's", () => {
         expect(resolvedWith(AnimationDefinition.of(eased(1)), {x: {0: '0', 1: '1'}}, 'backwards').x![0]!.fill).toBe('backwards');
         expect(resolvedWith(AnimationDefinition.of(eased(1)), {x: {0: '0', 1: '1'}}, 'none').x![0]!.fill).toBe('none');
+    });
+
+    it("fills an entry the mapping fills even where its track wouldn't", () => {
+        const sequence = Sequence.builder()
+            .add('a', AnimationDefinition.of(eased(2)), 0.5)
+            .add('b', AnimationDefinition.of(eased(1)), 0)
+            .build();
+        const valuesByPath = new Map([['a', [targetValuesOf(target, {x: {0: '0', 1: '1'}}, 'replace', 'both')]], ['b', [targetValuesOf(target, {x: {0: '0', 1: '1'}})]]]);
+        const effects = AnimationTracksResolver.resolve(computeTimings(sequence, new Map([['a', 1], ['b', 1]])), path => valuesByPath.get(path)!, textResolver).get(target)!.x!;
+        expect(effects.map(({delay, fill}) => ({delay, fill}))).toEqual([{delay: 0.5, fill: 'both'}, {delay: 0, fill: 'backwards'}]);
+    });
+
+    it("keeps an entry's inner effects from filling past its ends", () => {
+        const animation = AnimationDefinition.of(eased(1), {repeatCount: 2, repeatDelay: 0.5});
+        expect(resolvedWith(animation, {x: {0: '0', 1: '1'}}, 'none').x!.map(({fill}) => fill)).toEqual(['none', 'none']);
+        expect(resolvedWith(animation, {x: {0: '0', 1: '1'}}, 'backwards').x!.map(({fill}) => fill)).toEqual(['backwards', 'none']);
     });
 });
 

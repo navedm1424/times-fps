@@ -1,6 +1,6 @@
+import type {PropertyStops, StopValue} from "../resolution/stops.js";
 import type {Seconds} from "../types.js";
 import {landsOnStops} from "./native-effects.js";
-import type {PropertyStops, StopValue} from "./stops.js";
 import type {PlacedEffect, ResolvedEffect} from "./tracks.js";
 
 /** What resolving values needs from the page. */
@@ -65,7 +65,7 @@ export function resolveEffectChains(target: Element, property: string, effects: 
         const predecessor = predecessors.get(entry);
         const startText = predecessor ? stopValueShownAt(predecessor, entry.start)?.text : resolver.currentValueOf(target, property);
         if (startText === undefined) startsBetweenStops.add(entry);
-        else start.adopt(startText);
+        else start.adoptText(startText);
     }
 
     const passing = new Set(effects.filter(effect => landsOnStops(effect) && !startsBetweenStops.has(entryOf(effect, entries))));
@@ -77,7 +77,7 @@ export function resolveEffectChains(target: Element, property: string, effects: 
             units.set(chain, resolveChainValues(target, property, chain, resolver));
     }
     for (const entry of ordered) {
-        if (startsBetweenStops.has(entry)) entry.stops.startValue.resolve(valueShownAt(predecessors.get(entry)!, entry.start)!);
+        if (startsBetweenStops.has(entry)) entry.stops.startValue.assignNumber(valueShownAt(predecessors.get(entry)!, entry.start)!);
     }
 
     return effects.map(effect => ({...effect, unit: passing.has(effect) ? undefined : units.get(chains.get(entryOf(effect, entries))!)!}));
@@ -178,7 +178,7 @@ function resolveChainValues(target: Element, property: string, chain: readonly E
             const numeric = given?.unit === currentNumeric.unit ? given : resolvedNumericOf(value.text!);
             if (numeric.unit !== currentNumeric.unit)
                 throw new Error(`"${value.text}" resolves to a value in "${numeric.unit}" for "${property}", whose current value is in "${currentNumeric.unit}". ${sameUnitAdvice}`);
-            value.resolve(numeric.value);
+            value.assignNumber(numeric.value);
         }
         return currentNumeric.unit;
     }
@@ -189,7 +189,7 @@ function resolveChainValues(target: Element, property: string, chain: readonly E
         const unit = given[0]!.unit;
         if (!resolver.accepts(property, `1${unit}`))
             throw new Error(`"${property}" doesn't take values in "${unit}".`);
-        values.forEach((value, index) => value.resolve(given[index]!.value));
+        values.forEach((value, index) => value.assignNumber(given[index]!.value));
         return unit;
     }
 
@@ -199,7 +199,7 @@ function resolveChainValues(target: Element, property: string, chain: readonly E
     const units = new Set(numerics.map(({unit}) => unit));
     if (units.size > 1)
         throw new Error(`The values of "${property}" resolve to different units: ${[...units].map(unit => `"${unit}"`).join(', ')}. ${sameUnitAdvice}`);
-    values.forEach((value, index) => value.resolve(numerics[index]!.value));
+    values.forEach((value, index) => value.assignNumber(numerics[index]!.value));
     return numerics[0]!.unit;
 }
 
