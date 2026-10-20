@@ -59,6 +59,14 @@ export class AnimationControls {
         return this.onEveryAnimation('cancel', listener);
     }
 
+    /**
+     * Will start a new motion from the current value and velocity.
+     * @internal
+     */
+    retarget(): void {
+        throw new Error("Retargeting isn't implemented yet.");
+    }
+
     private onEveryAnimation(type: 'finish' | 'cancel', listener: () => void): () => void {
         const dispatched = new Set<Animation>();
         const removers = this.animations.map(animation => {

@@ -3,13 +3,12 @@ import {type AnimationTimings, entryPathOf, type EntryPath, type NodeTimings, ty
 import {TrackRun} from "../resolution/track-runs.js";
 import type {RepeatOptions, Seconds} from "../types.js";
 import {type CSSValueResolver, resolveEffectChains} from "./effect-chains.js";
-import type {AllowedFill} from "./mapping.js";
 import {type NativeAnimationEffect, nativeEffectOf} from "./native-effects.js";
 
-/** A target of an animation, with each property's stops, how its effects composite with what's under them, and the fill its mapping gives its ends, if any. */
+/** A target of an animation, with each property's stops. */
 export interface TargetValues {
     target: Element;
-    properties: { [property: string]: { stops: PropertyStops; composite: CompositeOperation; allowedFill: AllowedFill | undefined } };
+    properties: { [property: string]: PropertyStops };
 }
 
 /** Each target's properties, each with its effects in the order they're declared, which is the order they show over each other in. */
@@ -23,8 +22,6 @@ interface TrackKey {
     path: EntryPath | undefined;
     /** The stops its entry gives the property, before any repeat flips them. */
     entryStops: PropertyStops;
-    composite: CompositeOperation;
-    allowedFill: AllowedFill | undefined;
     order: readonly number[];
 }
 
@@ -103,14 +100,14 @@ export class AnimationTracksResolver {
 
     private resolveAnimationRepetitions(timings: AnimationTimings, path: EntryPath | undefined, order: readonly number[], repeatingAncestor: boolean): Contribution {
         const contribution: Contribution = {runs: [], effects: []};
-        const {animation, playDuration} = timings;
+        const {timing, playDuration} = timings;
         const values = this.valuesOf(path ?? '');
         for (const {index, start} of timings.targets) {
             const {target, properties} = values[index]!;
-            const runs = Object.entries(properties).map(([property, {stops, composite, allowedFill}]): KeyedRun =>
-                ({target, property, path, entryStops: stops, composite, allowedFill, order, run: TrackRun.play(playDuration, animation.easing, stops)})
+            const runs = Object.entries(properties).map(([property, stops]): KeyedRun =>
+                ({target, property, path, entryStops: stops, order, run: TrackRun.play(playDuration, timing.easing, stops)})
             );
-            const repeated = AnimationTracksResolver.repeated({runs, effects: []}, playDuration, animation.options, repeatingAncestor, order.length);
+            const repeated = AnimationTracksResolver.repeated({runs, effects: []}, playDuration, timing.options, repeatingAncestor, order.length);
             const placed = AnimationTracksResolver.shifted(repeated, start);
             contribution.runs.push(...placed.runs);
             contribution.effects.push(...placed.effects);
@@ -120,7 +117,7 @@ export class AnimationTracksResolver {
 
     private resolveSequenceRepetitions(timings: SequenceTimings, path: EntryPath | undefined, order: readonly number[], repeatingAncestor: boolean): Contribution {
         const {options} = timings.sequence;
-        const repeats = (options.repeatCount ?? 0) > 0;
+        const repeats = (options.repeat ?? 0) > 0;
         const children: Contribution = {runs: [], effects: []};
         [...timings.entries].forEach(([name, entryTimings], index) => {
             const child = this.scheduleRepetitions(entryTimings, entryPathOf(path, name), [...order, index], repeatingAncestor || repeats);
@@ -136,7 +133,7 @@ export class AnimationTracksResolver {
      * An infinite repeat inside another keeps its first iteration and continues in an effect of its own, declared before the runs so that they show over it.
      */
     private static repeated({runs, effects}: Contribution, iterationDuration: Seconds, options: RepeatOptions, repeatingAncestor: boolean, depth: number): Contribution {
-        const repeatCount = options.repeatCount ?? 0;
+        const repeatCount = options.repeat ?? 0;
         if (!repeatingAncestor) {
             const repeatedEffects = runs.flatMap(({run, ...key}) => nativelyRepeated(run, iterationDuration, options)
                 .map((timing, index): ScheduledEffect => ({...key, order: [...key.order, index], ...timing}))
@@ -164,26 +161,19 @@ export class AnimationTracksResolver {
     }
 
     /**
-     * Effects that are declared earlier and lie within a later one that replaces what's under it never show, so they're dropped.
+     * Effects that are declared earlier and lie within a later one never show, so they're dropped.
      * Only the ones that start first fill backwards, and an effect fills forwards unless one declared before it runs on after it ends.
-     * A mapped fill overrides these at its entry's ends: the backwards fill of its first-starting effect, and the forwards fill of its last-ending one.
-     * The entry's other effects only keep the fills it has, so none of them shows past its ends.
      */
     private static placeFills(effects: readonly ScheduledEffect[]): PlacedEffect[] {
         const endOf = ({delay, duration, iterations}: ScheduledEffect) => delay + (duration === 0 ? 0 : duration * iterations);
         const shown = effects.filter((effect, index) => !effects.some((later, laterIndex) =>
-            laterIndex > index && later.composite === 'replace' && later.delay <= effect.delay && endOf(effect) <= endOf(later)
+            laterIndex > index && later.delay <= effect.delay && endOf(effect) <= endOf(later)
         ));
 
         const firstStart = Math.min(...shown.map(({delay}) => delay));
         return shown.map((effect, index) => {
-            const entryEffects = shown.filter(other => other.entryStops === effect.entryStops);
-            const startsEntry = effect.delay === Math.min(...entryEffects.map(({delay}) => delay));
-            const endsEntry = endOf(effect) === Math.max(...entryEffects.map(endOf));
-            const overrides = effect.allowedFill !== undefined;
-            const keeps = (side: 'backwards' | 'forwards') => !overrides || effect.allowedFill === side || effect.allowedFill === 'both';
-            const backwards = ((overrides && startsEntry) || effect.delay === firstStart) && keeps('backwards');
-            const forwards = ((overrides && endsEntry) || !shown.slice(0, index).some(earlier => endOf(earlier) > endOf(effect))) && keeps('forwards');
+            const backwards = effect.delay === firstStart;
+            const forwards = !shown.slice(0, index).some(earlier => endOf(earlier) > endOf(effect));
             const fill: FillMode = backwards && forwards ? 'both' : backwards ? 'backwards' : forwards ? 'forwards' : 'none';
             return {...effect, fill};
         });
@@ -204,7 +194,7 @@ function timingOf(run: TrackRun, iterations = 1, direction: PlaybackDirection = 
 
 /** The repeat as WAAPI iterations, the first effect starting at the run's start. */
 function nativelyRepeated(run: TrackRun, iterationDuration: Seconds, options: RepeatOptions): EffectTiming[] {
-    const {repeatCount = 0, repeatDelay = 0, repeatMode = 'loop'} = options;
+    const {repeat: repeatCount = 0, repeatDelay = 0, repeatMode = 'loop'} = options;
     const period = iterationDuration + repeatDelay;
     const repeatsForever = !Number.isFinite(repeatCount);
     const playCount = repeatCount + 1;
@@ -247,7 +237,7 @@ function nativelyRepeated(run: TrackRun, iterationDuration: Seconds, options: Re
 
 /** Every iteration of a finite repeat in the run, one after another. */
 function baked(run: TrackRun, iterationDuration: Seconds, options: RepeatOptions): TrackRun {
-    const playCount = (options.repeatCount ?? 0) + 1;
+    const playCount = (options.repeat ?? 0) + 1;
     return TrackRun.joined(Array.from({length: playCount}, (_, index) => run.iteration(index, iterationDuration, options)));
 }
 

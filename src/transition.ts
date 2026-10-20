@@ -4,26 +4,31 @@ import {PRECISION} from "./constants.js";
 import type {Progress, Seconds} from "./types.js";
 import {checkNumber, checkPositive} from "./utils/validation.js";
 
-export type Transition = EasedTransition | SpringTransition;
+/** Leaves the keys out: a literal that has any of them is a type error. */
+type Without<Keys extends string> = { [Key in Keys]?: never };
 
-// /** Duration comes from the animation's ratio, so only transitions shaped by a given duration fit. */
-// export type StretchableTransition =
-//     | Omit<EasedTransition, 'duration'>
-//     | Omit<DurationSpringTransition, 'duration'>;
-
-export interface EasedTransition {
-    type: 'eased';
+/** A timed transition with an easing; it's the kind a `duration` without a `bounce` is. */
+export interface EasedTransitionDescriptor extends Without<'bounce' | 'visualDuration' | 'stiffness' | 'damping' | 'mass' | 'velocity' | 'restDelta'> {
     duration: Seconds;
     easing?: EasingDescriptor;
 }
 
-export function eased(duration: Seconds, easing?: EasingDescriptor): EasedTransition {
-    return {type: 'eased', duration, ...(easing && {easing})};
+/** Shaped by `bounce` and stretched so it comes to rest at the end of `duration`. */
+export interface DurationSpringTransitionDescriptor extends Without<'easing' | 'visualDuration' | 'stiffness' | 'damping' | 'mass' | 'restDelta'> {
+    duration: Seconds;
+    bounce: number;            // 0 = no overshoot
+    velocity?: number;         // progress per second
+}
+
+/** Shaped by `bounce`, with `visualDuration` setting how fast it swings; it runs on past it until it comes to rest. */
+export interface VisualSpringTransitionDescriptor extends Without<'duration' | 'easing' | 'stiffness' | 'damping' | 'mass' | 'restDelta'> {
+    visualDuration: Seconds;
+    bounce: number;            // 0 = no overshoot
+    velocity?: number;         // progress per second
 }
 
 /** Works out its own duration. */
-export interface PhysicalSpringTransition {
-    type: 'spring';
+export interface PhysicalSpringTransitionDescriptor extends Without<'duration' | 'easing' | 'bounce' | 'visualDuration'> {
     stiffness: number;
     damping: number;
     mass?: number;
@@ -31,77 +36,109 @@ export interface PhysicalSpringTransition {
     restDelta?: Progress;      // defaults to `PRECISION`
 }
 
-/** Shaped by `bounce` and stretched so it comes to rest at the end of `duration`. */
-export interface DurationSpringTransition {
-    type: 'spring';
-    duration: Seconds;
-    bounce: number;            // 0 = no overshoot
-    velocity?: number;         // progress per second
+export type SpringTransitionDescriptor = DurationSpringTransitionDescriptor | VisualSpringTransitionDescriptor | PhysicalSpringTransitionDescriptor;
+
+export type TransitionDescriptor = EasedTransitionDescriptor | SpringTransitionDescriptor;
+
+// /** Duration comes from the animation's ratio, so only transitions shaped by a given duration fit. */
+// export type StretchableTransition =
+//     | Omit<EasedTransitionDescriptor, 'duration'>
+//     | Omit<DurationSpringTransitionDescriptor, 'duration'>;
+
+type TransitionKind = 'eased' | 'durationSpring' | 'visualSpring' | 'physicalSpring';
+
+const transitionKeysByKind: { [Kind in TransitionKind]: readonly string[] } = {
+    eased: ['duration', 'easing'],
+    durationSpring: ['duration', 'bounce', 'velocity'],
+    visualSpring: ['visualDuration', 'bounce', 'velocity'],
+    physicalSpring: ['stiffness', 'damping', 'mass', 'velocity', 'restDelta']
+};
+
+const transitionKeys = new Set(Object.values(transitionKeysByKind).flat());
+
+/** The keys a transition can have, which never overlap a timing's options. */
+export function isTransitionKey(key: string): boolean {
+    return transitionKeys.has(key);
 }
 
-/** Shaped by `bounce`, with `visualDuration` setting how fast it swings; it runs on past it until it comes to rest. */
-export interface VisualSpringTransition {
-    type: 'spring';
-    visualDuration: Seconds;
-    bounce: number;            // 0 = no overshoot
-    velocity?: number;         // progress per second
+/** Physical with `stiffness` or `damping`, visual with `visualDuration`, a duration spring with `bounce`, and eased otherwise. */
+function transitionKindOf(transition: TransitionDescriptor): TransitionKind {
+    if (transition.stiffness !== undefined || transition.damping !== undefined) return 'physicalSpring';
+    if (transition.visualDuration !== undefined) return 'visualSpring';
+    if (transition.bounce !== undefined) return 'durationSpring';
+    return 'eased';
 }
 
-export type SpringTransition = PhysicalSpringTransition | DurationSpringTransition | VisualSpringTransition;
-
-export function spring(options: Omit<PhysicalSpringTransition, 'type'>): PhysicalSpringTransition;
-export function spring(options: Omit<DurationSpringTransition, 'type'>): DurationSpringTransition;
-export function spring(options: Omit<VisualSpringTransition, 'type'>): VisualSpringTransition;
-export function spring(
-    options: Omit<PhysicalSpringTransition, 'type'> | Omit<DurationSpringTransition, 'type'> | Omit<VisualSpringTransition, 'type'>
-): SpringTransition {
-    return {type: 'spring', ...options};
-}
-
-/** Rejects what no play can run, and every spring that can't come to rest, before it reaches the spring's own checks. */
-export function checkTransition(transition: Transition, label: string): void {
-    if (transition.type === 'eased') {
-        if (checkNumber(transition.duration, `${label}'s duration`) < 0)
-            throw new RangeError(`${label}'s duration can't be negative, not ${transition.duration}.`);
-        return;
-    }
+/** Rejects keys of another kind, what no play can run, and every spring that can't come to rest, before it reaches the spring's own checks. */
+export function checkTransition(transition: TransitionDescriptor, label: string): void {
+    const kind = transitionKindOf(transition);
+    const kindKeys = transitionKeysByKind[kind];
+    const strayKey = Object.keys(transition).find(key =>
+        isTransitionKey(key) && !kindKeys.includes(key) && transition[key as keyof TransitionDescriptor] !== undefined
+    );
+    if (strayKey !== undefined)
+        throw new TypeError(`${label} has "${strayKey}", which a transition with ${kindKeys.map(key => `"${key}"`).join(', ')} doesn't take.`);
 
     checkNumber(transition.velocity, `${label}'s velocity`);
-    if ('stiffness' in transition) {
-        checkPositive(transition.stiffness, `${label}'s stiffness`);
-        checkPositive(transition.damping, `${label}'s damping`);
-        checkPositive(transition.mass, `${label}'s mass`);
-        const {restDelta} = transition;
-        if (checkNumber(restDelta, `${label}'s rest delta`) !== undefined && !(restDelta! > 0 && restDelta! < 1))
-            throw new RangeError(`${label}'s rest delta must be between 0 and 1, not ${restDelta}.`);
-        return;
+    switch (kind) {
+        case 'eased':
+            requireNumber(transition.duration, `${label}'s duration`);
+            if (checkNumber(transition.duration, `${label}'s duration`) < 0)
+                throw new RangeError(`${label}'s duration can't be negative, not ${transition.duration}.`);
+            return;
+        case 'physicalSpring': {
+            requireNumber(transition.stiffness, `${label}'s stiffness`);
+            requireNumber(transition.damping, `${label}'s damping`);
+            checkPositive(transition.stiffness, `${label}'s stiffness`);
+            checkPositive(transition.damping, `${label}'s damping`);
+            checkPositive(transition.mass, `${label}'s mass`);
+            const {restDelta} = transition;
+            if (checkNumber(restDelta, `${label}'s rest delta`) !== undefined && !(restDelta! > 0 && restDelta! < 1))
+                throw new RangeError(`${label}'s rest delta must be between 0 and 1, not ${restDelta}.`);
+            return;
+        }
+        case 'visualSpring':
+            checkBounce(transition.bounce, label);
+            checkPositive(transition.visualDuration, `${label}'s visual duration`);
+            return;
+        case 'durationSpring':
+            checkBounce(transition.bounce, label);
+            requireNumber(transition.duration, `${label}'s duration`);
+            checkPositive(transition.duration, `${label}'s duration`);
+            return;
     }
+}
 
-    if (!(transition.bounce > -1 && transition.bounce < 1))
-        throw new RangeError(`${label}'s bounce must be between -1 and 1, not ${transition.bounce}.`);
-    if ('visualDuration' in transition) checkPositive(transition.visualDuration, `${label}'s visual duration`);
-    else checkPositive(transition.duration, `${label}'s duration`);
+function checkBounce(bounce: number | undefined, label: string): void {
+    if (!(bounce! > -1 && bounce! < 1))
+        throw new RangeError(`${label}'s bounce must be between -1 and 1, not ${bounce}.`);
+}
+
+function requireNumber(value: number | undefined, label: string): asserts value is number {
+    if (typeof value !== 'number') throw new TypeError(`${label} is required.`);
 }
 
 /** How long one play of the transition lasts, and the easing it runs. */
-export function resolveTransition(transition: Transition): { duration: Seconds; easing: EasingFunction } {
-    if (transition.type === 'eased')
-        return {duration: transition.duration, easing: transition.easing ? resolveEasing(transition.easing) : linear};
+export function resolveTransition(transition: TransitionDescriptor): { duration: Seconds; easing: EasingFunction } {
+    if (transitionKindOf(transition) === 'eased') {
+        const {duration, easing} = transition as EasedTransitionDescriptor;
+        return {duration, easing: easing ? resolveEasing(easing) : linear};
+    }
 
-    const {spring, duration} = resolveSpring(transition);
+    const {spring, duration} = resolveSpring(transition as SpringTransitionDescriptor);
     return {duration, easing: new SpringEasing(spring, duration)};
 }
 
 /** The spring a transition describes, and how long it runs until it's at rest. */
-export function resolveSpring(transition: SpringTransition): { spring: DampedSpring; duration: Seconds } {
+export function resolveSpring(transition: SpringTransitionDescriptor): { spring: DampedSpring; duration: Seconds } {
     const velocity = transition.velocity ?? 0;
-    if ('stiffness' in transition) {
+    if (transition.stiffness !== undefined) {
         const spring = DampedSpring.physical(transition.stiffness, transition.damping, transition.mass ?? 1, velocity);
         return {spring, duration: spring.restTime(transition.restDelta ?? PRECISION)};
     }
 
     const dampingRatio = dampingRatioOfBounce(transition.bounce);
-    if ('visualDuration' in transition) {
+    if (transition.visualDuration !== undefined) {
         const spring = new DampedSpring(2 * Math.PI / transition.visualDuration, dampingRatio, velocity);
         return {spring, duration: spring.restTime(PRECISION)};
     }

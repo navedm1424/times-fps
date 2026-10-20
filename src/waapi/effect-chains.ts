@@ -100,11 +100,11 @@ function entryOf(effect: PlacedEffect, entries: readonly EntryEffects[]): EntryE
     return entries.find(entry => entry.stops === effect.entryStops)!;
 }
 
-/** The effect declared last among the entries' effects that replace what's under them and show a value at `time`. */
+/** The effect declared last among the entries' effects that show a value at `time`. */
 function shownEffectAt(time: Seconds, entries: readonly EntryEffects[], declaredIndices: ReadonlyMap<PlacedEffect, number>): PlacedEffect | undefined {
     return entries
         .flatMap(({effects}) => effects)
-        .filter(effect => effect.composite === 'replace' && iterationTimeAt(effect, time) !== undefined)
+        .filter(effect => iterationTimeAt(effect, time) !== undefined)
         .sort((first, second) => declaredIndices.get(first)! - declaredIndices.get(second)!)
         .at(-1);
 }

@@ -27,7 +27,6 @@ export interface NativeAnimationEffect {
     fill: FillMode;
     easing: NativeEasing;
     keyframes: NativeKeyframe[];
-    composite: CompositeOperation;
     /** The animation leaf it comes from, which is undefined for an animation on its own. */
     path: EntryPath | undefined;
 }
@@ -36,8 +35,8 @@ export interface NativeAnimationEffect {
  * The effect with its spans' easings as WAAPI ones.
  * A single whole play keeps its easing on the effect, with the stops as linear keyframes; otherwise the easings are split into the keyframes.
  */
-export function nativeEffectOf({run, delay, duration, iterations, direction, fill, unit, composite, path}: ResolvedEffect): NativeAnimationEffect {
-    const timing = {delay, duration, iterations, direction, fill, composite, path};
+export function nativeEffectOf({run, delay, duration, iterations, direction, fill, unit, path}: ResolvedEffect): NativeAnimationEffect {
+    const timing = {delay, duration, iterations, direction, fill, path};
     const values = unit === undefined ? stopTexts : numbersIn(unit);
     if (easesOnEffect(run, duration)) {
         const [span] = run.spans;

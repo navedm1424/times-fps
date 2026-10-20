@@ -1,6 +1,6 @@
-import type {SimpleAnimation} from "../animation.js";
+import type {AnimationTiming} from "../animation.js";
 import type {AtAnchor, ParsedAt} from "../at.js";
-import {Sequence} from "../sequence.js";
+import {SequenceTiming} from "../sequence.js";
 import type {RepeatOptions, Seconds, Stagger} from "../types.js";
 import {checkNumber} from "../utils/validation.js";
 
@@ -11,7 +11,7 @@ export function entryPathOf(parentPath: EntryPath | undefined, name: string): En
     return parentPath ? `${parentPath}>${name}` : name;
 }
 
-/** Sequence-local times an entry's `at` can refer to. */
+/** Sequence-local times an entry's `at` can refer to: its first start and its last referenceable end. */
 type EntryReferences = { [Anchor in AtAnchor]: Seconds };
 
 /**
@@ -47,13 +47,13 @@ export interface TargetStart {
 
 export interface AnimationTimings extends EntryTimings {
     type: 'animation';
-    animation: SimpleAnimation;
+    timing: AnimationTiming;
     targets: readonly TargetStart[];
 }
 
 export interface SequenceTimings extends EntryTimings {
     type: 'sequence';
-    sequence: Sequence;
+    sequence: SequenceTiming;
     delay: Seconds;
     entries: ReadonlyMap<string, NodeTimings>;
 }
@@ -61,24 +61,24 @@ export interface SequenceTimings extends EntryTimings {
 /** A staggered sequence, played once for each index of its animations' targets. */
 export interface StaggeredSequenceTimings extends EntryReach {
     type: 'staggered-sequence';
-    sequence: Sequence;
+    sequence: SequenceTiming;
     lanes: readonly SequenceTimings[];
 }
 
 export type NodeTimings = AnimationTimings | SequenceTimings | StaggeredSequenceTimings;
 
-export function computeTimings(animation: SimpleAnimation, targetCount: number): AnimationTimings;
-export function computeTimings(sequence: Sequence, targetCounts: ReadonlyMap<EntryPath, number>): SequenceTimings | StaggeredSequenceTimings;
+export function computeTimings(timing: AnimationTiming, targetCount: number): AnimationTimings;
+export function computeTimings(sequence: SequenceTiming, targetCounts: ReadonlyMap<EntryPath, number>): SequenceTimings | StaggeredSequenceTimings;
 export function computeTimings(
-    definition: SimpleAnimation | Sequence,
+    timing: AnimationTiming | SequenceTiming,
     targetCounts: number | ReadonlyMap<EntryPath, number>
 ): NodeTimings {
-    if (definition instanceof Sequence) {
+    if (timing instanceof SequenceTiming) {
         if (typeof targetCounts === 'number') throw new Error("A sequence needs the target counts of its animations.");
-        return sequenceTimings(definition, 0, undefined, targetCounts, undefined);
+        return sequenceTimings(timing, 0, undefined, targetCounts, undefined);
     }
     if (typeof targetCounts !== 'number') throw new Error("An animation needs its target count.");
-    return animationTimings(definition, 0, undefined, targetCounts, undefined);
+    return animationTimings(timing, 0, undefined, targetCounts, undefined);
 }
 
 /** Each target's delay; a staggered one that's negative becomes 0. */
@@ -89,21 +89,21 @@ export function staggeredDelays(delay: Seconds | Stagger, targetCount: number): 
     });
 }
 
-function animationTimings(animation: SimpleAnimation, position: Seconds, path: EntryPath | undefined, targetCount: number, lane: Lane | undefined): AnimationTimings {
+function animationTimings(timing: AnimationTiming, position: Seconds, path: EntryPath | undefined, targetCount: number, lane: Lane | undefined): AnimationTimings {
     if (lane && targetCount !== lane.count)
         throw new Error(`Entry "${path}" has ${targetCount} targets, but the staggered sequence it's in plays ${lane.count}.`);
 
-    const {delay = 0, ...repeatOptions} = animation.options;
+    const {delay = 0, ...repeatOptions} = timing.options;
     const delays = staggeredDelays(delay, targetCount);
     const targets = (lane ? [lane.index] : delays.map((_, index) => index)).map(index => ({index, start: position + delays[index]!}));
     const firstStart = targets.length ? Math.min(...targets.map(({start}) => start)) : position;
     const latestStart = targets.length ? Math.max(...targets.map(({start}) => start)) : position;
-    const playDuration = animation.duration;
+    const playDuration = timing.duration;
     const totalDuration = repeatedDuration(playDuration, repeatOptions);
     const ends = Number.isFinite(totalDuration);
     return {
         type: 'animation',
-        animation,
+        timing,
         targets,
         firstStart,
         end: ends ? latestStart + totalDuration : undefined,
@@ -114,7 +114,7 @@ function animationTimings(animation: SimpleAnimation, position: Seconds, path: E
 }
 
 function sequenceTimings(
-    sequence: Sequence,
+    sequence: SequenceTiming,
     position: Seconds,
     path: EntryPath | undefined,
     targetCounts: ReadonlyMap<EntryPath, number>,
@@ -126,20 +126,19 @@ function sequenceTimings(
 
     const entries = new Map<string, NodeTimings>();
     const references = new Map<string, EntryReferences>();
-    let lastReferences: EntryReferences | undefined;
+    let previousReferences: EntryReferences = {start: 0, end: 0};
     for (const name of sequence.names) {
         const entry = sequence.entries[name]!;
         const entryPath = entryPathOf(path, name);
-        const entryPosition = Math.max(0, positionOf(entry.at, lastReferences, references));
+        const timingsAt = (entryPosition: Seconds): NodeTimings => 'sequence' in entry
+            ? sequenceTimings(entry.sequence, entryPosition, entryPath, targetCounts, lane)
+            : animationTimings(entry.timing, entryPosition, entryPath, targetCountOf(entryPath, targetCounts), lane);
+        const insertedSpan = () => spanOf(referencesOf(timingsAt(0)));
+        const entryPosition = Math.max(0, positionOf(entry.at, previousReferences, references, insertedSpan));
 
-        let timings: NodeTimings;
-        if ('sequence' in entry)
-            timings = sequenceTimings(entry.sequence, entryPosition, entryPath, targetCounts, lane);
-        else
-            timings = animationTimings(entry.animation, entryPosition, entryPath, targetCountOf(entryPath, targetCounts), lane);
-
+        const timings = timingsAt(entryPosition);
         entries.set(name, timings);
-        references.set(name, lastReferences = {start: timings.firstStart, end: timings.lastReferenceableEnd});
+        references.set(name, previousReferences = referencesOf(timings));
     }
 
     const ownDelay = typeof delay === 'number' ? delay : staggeredDelays(delay, lane!.count)[lane!.index]!;
@@ -163,7 +162,7 @@ function sequenceTimings(
 
 /** A copy for each index of the targets, which every animation inside must have as many of. */
 function staggeredSequenceTimings(
-    sequence: Sequence,
+    sequence: SequenceTiming,
     position: Seconds,
     path: EntryPath | undefined,
     targetCounts: ReadonlyMap<EntryPath, number>
@@ -187,7 +186,7 @@ function staggeredSequenceTimings(
     };
 }
 
-function leafPathsOf(sequence: Sequence, path: EntryPath | undefined): EntryPath[] {
+function leafPathsOf(sequence: SequenceTiming, path: EntryPath | undefined): EntryPath[] {
     return sequence.names.flatMap(name => {
         const entry = sequence.entries[name]!;
         const entryPath = entryPathOf(path, name);
@@ -195,15 +194,38 @@ function leafPathsOf(sequence: Sequence, path: EntryPath | undefined): EntryPath
     });
 }
 
+function referencesOf({firstStart, lastReferenceableEnd}: EntryReach): EntryReferences {
+    return {start: firstStart, end: lastReferenceableEnd};
+}
+
+function spanOf({start, end}: EntryReferences): Seconds {
+    return end - start;
+}
+
+/** Everything before the entry, from the earliest first start to the latest last referenceable end, or the start of the sequence with nothing before it. */
+function everythingSoFarOf(references: ReadonlyMap<string, EntryReferences>): EntryReferences {
+    const earlier = [...references.values()];
+    if (earlier.length === 0) return {start: 0, end: 0};
+    return {start: Math.min(...earlier.map(({start}) => start)), end: Math.max(...earlier.map(({end}) => end))};
+}
+
+/** `insertedSpan` gives the span of the entry being placed, which doesn't depend on its position. */
 function positionOf(
     parsedAt: ParsedAt<string>,
-    lastReferences: EntryReferences | undefined,
-    references: ReadonlyMap<string, EntryReferences>
+    previousReferences: EntryReferences,
+    references: ReadonlyMap<string, EntryReferences>,
+    insertedSpan: () => Seconds
 ): Seconds {
     if (parsedAt.kind === 'absolute')
         return parsedAt.time;
-    const reference = parsedAt.reference ? references.get(parsedAt.reference) : lastReferences;
-    return (reference?.[parsedAt.anchor] ?? 0) + parsedAt.offset;
+    const {reference: referenceKind, anchor, offset, offsetUnit} = parsedAt;
+    const reference = referenceKind.kind === 'entry' ? references.get(referenceKind.name)!
+        : referenceKind.kind === 'everything-so-far' ? everythingSoFarOf(references)
+        : previousReferences;
+    const offsetTime = offsetUnit === 'seconds' ? offset
+        : offsetUnit === 'referenced-span' ? offset * spanOf(reference)
+        : offset * insertedSpan();
+    return reference[anchor] + offsetTime;
 }
 
 function targetCountOf(path: EntryPath, targetCounts: ReadonlyMap<EntryPath, number>): number {
@@ -212,7 +234,7 @@ function targetCountOf(path: EntryPath, targetCounts: ReadonlyMap<EntryPath, num
     return targetCount;
 }
 
-function repeatedDuration(playDuration: Seconds, {repeatCount = 0, repeatDelay = 0}: RepeatOptions): Seconds {
-    if (repeatCount === Infinity) return Infinity;
-    return playDuration * (repeatCount + 1) + repeatDelay * repeatCount;
+function repeatedDuration(playDuration: Seconds, {repeat = 0, repeatDelay = 0}: RepeatOptions): Seconds {
+    if (repeat === Infinity) return Infinity;
+    return playDuration * (repeat + 1) + repeatDelay * repeat;
 }

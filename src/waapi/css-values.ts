@@ -1,7 +1,7 @@
 import {PropertyStops} from "../resolution/stops.js";
 import {checkNumber} from "../utils/validation.js";
 import type {CSSValueResolver} from "./effect-chains.js";
-import type {AllowedFill, CSSValue, ValueStops} from "./mapping.js";
+import {type AnimationValues, type CSSValue, progressStopsOf} from "./mapping.js";
 import type {TargetValues} from "./tracks.js";
 
 /** The CSS name of a property given in camelCase; a custom property is already given by it. */
@@ -23,18 +23,16 @@ export function keyframePropertyOf(property: string): string {
 /** Each target's stops, as CSS text; a bare number takes the property's default unit. */
 export function resolveTargetValues(
     targets: readonly Element[],
-    values: { [property: string]: ValueStops },
-    composite: CompositeOperation,
-    allowedFill: AllowedFill | undefined
+    values: AnimationValues
 ): TargetValues[] {
     const textStops = Object.entries(values).map(([property, valueStops]) => {
         const type = PropertyValueType.of(cssPropertyNameOf(property));
-        const texts = progressEntriesOf(valueStops).map(([progress, value]) => [progress, cssTextOf(property, value, type)]);
+        const texts = progressStopsOf(property, valueStops).map(([progress, value]) => [progress, cssTextOf(property, value, type)]);
         return [property, Object.fromEntries(texts)] as const;
     });
     return targets.map(target => ({
         target,
-        properties: Object.fromEntries(textStops.map(([property, texts]) => [property, {stops: PropertyStops.of(property, texts, composite), composite, allowedFill}]))
+        properties: Object.fromEntries(textStops.map(([property, texts]) => [property, PropertyStops.of(property, texts)]))
     }));
 }
 
@@ -44,14 +42,6 @@ export const domValueResolver: CSSValueResolver = {
     accepts: (property, text) => CSS.supports(cssPropertyNameOf(property), text),
     resolve: (target, property, text) => PropertyValueType.of(cssPropertyNameOf(property)).resolve(target, text)
 };
-
-/** A list's values are spread evenly from 0 to 1; a single one stands at 0. */
-function progressEntriesOf(valueStops: ValueStops): [progress: number, value: CSSValue][] {
-    if (!Array.isArray(valueStops))
-        return Object.entries(valueStops).map(([progress, value]) => [Number(progress), value]);
-    const values: readonly CSSValue[] = valueStops;
-    return values.map((value, index) => [values.length > 1 ? index / (values.length - 1) : 0, value]);
-}
 
 function cssTextOf(property: string, value: CSSValue, type: PropertyValueType): string {
     if (typeof value === 'string') return value;

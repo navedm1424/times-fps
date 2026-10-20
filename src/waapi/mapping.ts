@@ -1,52 +1,81 @@
-import type {SimpleAnimation} from "../animation.js";
-import type {NestedSequenceEntry, Sequence, SequenceEntries, SimpleAnimationEntry} from "../sequence.js";
+import type {SubsequenceTimingEntry, SequenceTiming, SequenceTimingEntries} from "../sequence.js";
+import {sortedByKey} from "../utils/records.js";
 
 export type CSSSelector = string;
 
-/** An entry's fills at its ends, as WAAPI's `fill`. */
-export type AllowedFill = Exclude<FillMode, 'auto'>;
-
 /** Elements, or what finds them in the scope. */
-export type Target = Element | Element[] | CSSSelector | ((scope: Element) => Element | Element[]);
+export type Target = Element | Element[] | CSSSelector | ((scope: Element) => Element | Iterable<Element>);
 
 /** A number, a number with a unit, or a CSS expression that resolves to one. */
 export type CSSValue = number | string;
 
-/** Values keyed by progress, or listed evenly from 0 to 1. */
-export type ValueStops = readonly CSSValue[] | {
-    [progress: number]: CSSValue;
+/** One value to animate to, values listed evenly from 0 to 1, or values keyed by progress; `null` at an end stands for the value underneath. */
+export type ValueStops = CSSValue | readonly (CSSValue | null)[] | {
+    [progress: number]: CSSValue | null;
 };
 
-export type AnimationMapping = {
+/** Each property's values. */
+export type AnimationValues = {
+    [property: string]: ValueStops;
+};
+
+/** The targets and values of an animation timing's entry. */
+export interface AnimationMapping {
     target: Target;
-    values: {
-        [property: string]: ValueStops;
-    };
-    /** How the values combine with what's under them, which they replace by default. */
-    composite?: CompositeOperation;
-    /** Whether the entry fills backwards before it starts and forwards after it ends, over the fills its track gives it; those by default. */
-    fill?: AllowedFill;
+    values: AnimationValues;
+}
+
+/** A sequence timing's targets and values, keyed by entry name, with a nested mapping for each nested sequence timing. */
+export type SequenceMapping<Timing extends SequenceTiming> = Timing extends SequenceTiming<infer SE> ? SequenceMappingOf<SE> : never;
+
+type SequenceMappingOf<SE extends SequenceTimingEntries> = {
+    [N in keyof SE]: SE[N] extends SubsequenceTimingEntry<infer NS> ? SequenceMapping<NS> : AnimationMapping;
 };
 
-export type SequenceMapping<SE extends SequenceEntries = SequenceEntries> = {
-    [N in keyof SE]: SE[N] extends NestedSequenceEntry<Sequence<infer NSE>>
-        ? SequenceMapping<NSE>
-        : SE[N] extends SimpleAnimationEntry
-            ? AnimationMapping
-            : never;
-};
+/** A mapping as it's played: a leaf for each animation, and a node for each sequence. */
+export type MappingTree = AnimationMapping | SequenceMappingNode;
 
-/** The mapping a definition takes. */
-export type MappingOf<Definition extends SimpleAnimation | Sequence> = Definition extends Sequence<infer SE>
-    ? SequenceMapping<SE>
-    : AnimationMapping;
+export interface SequenceMappingNode {
+    entries: { readonly [name: string]: MappingTree };
+    /** Whether the sequence splits one animation into an entry per property, so its level is left out of animation ids. */
+    splitsProperties: boolean;
+}
+
+/** The values as stops keyed by progress, with the missing ones left out; a single value is the last, as in WAAPI. */
+export function progressStopsOf(property: string, valueStops: ValueStops): [progress: number, value: CSSValue][] {
+    const given: [number, CSSValue | null][] = typeof valueStops !== 'object'
+        ? [[1, valueStops]]
+        : Array.isArray(valueStops)
+            ? listedStopsOf(valueStops)
+            : sortedByKey(valueStops as { [progress: number]: CSSValue | null });
+    if (given.length === 0) throw new Error(`"${property}" has no values.`);
+
+    given.forEach(([progress, value], index) => {
+        if (!(progress >= 0 && progress <= 1))
+            throw new RangeError(`"${property}" has a value at ${progress}, outside the 0–1 range.`);
+        if (value === null && index !== 0 && index !== given.length - 1)
+            throw new Error(`"${property}" has a null between its ends; null only stands for the value underneath at the start or the end.`);
+    });
+    const stops = given.filter((stop): stop is [number, CSSValue] => stop[1] !== null);
+    if (stops.length === 0) throw new Error(`"${property}" has no values.`);
+    return stops;
+}
+
+function listedStopsOf(values: readonly (CSSValue | null)[]): [number, CSSValue | null][] {
+    if (values.length === 1) return [[1, values[0]!]];
+    return values.map((value, index) => [index / (values.length - 1), value]);
+}
 
 /** The target's elements, each once; a target with none is a mistake. */
 export function resolveTargets(target: Target, scope: Element): Element[] {
     const elements = typeof target === 'string' ? [...scope.querySelectorAll(target)]
-        : typeof target === 'function' ? [target(scope)].flat()
+        : typeof target === 'function' ? elementsOf(target(scope))
         : [target].flat();
     if (elements.length === 0)
         throw new Error(typeof target === 'string' ? `"${target}" matches no elements.` : "The target has no elements.");
     return [...new Set(elements)];
+}
+
+function elementsOf(found: Element | Iterable<Element>): Element[] {
+    return Symbol.iterator in found ? [...found] : [found];
 }

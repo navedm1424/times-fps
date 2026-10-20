@@ -45,12 +45,12 @@ interface Stop {
 
 /**
  * One property's values along the change, sorted by progress.
- * A missing 0 is the value the track has as the entry starts, or the first given value for an entry that adds to what's under it; a missing 1 is the last given value.
+ * A missing 0 is the value the track has as the entry starts; a missing 1 is the last given value.
  */
 export class PropertyStops {
     private constructor(readonly stops: readonly Stop[]) {}
 
-    static of(property: string, valueStops: { [progress: number]: string | number }, composite: CompositeOperation = 'replace'): PropertyStops {
+    static of(property: string, valueStops: { [progress: number]: string | number }): PropertyStops {
         const stops = sortedByKey(valueStops).map(([progress, value]) => ({progress, value: new StopValue(String(value))}));
         const first = stops[0];
         const last = stops.at(-1);
@@ -61,7 +61,7 @@ export class PropertyStops {
                 throw new RangeError(`"${property}" has a value at ${progress}, outside the 0–1 range.`);
         }
 
-        if (first.progress !== 0) stops.unshift({progress: 0, value: composite === 'replace' ? new StopValue(undefined) : first.value});
+        if (first.progress !== 0) stops.unshift({progress: 0, value: new StopValue(undefined)});
         if (last.progress !== 1) stops.push({progress: 1, value: last.value});
         return new PropertyStops(stops);
     }

@@ -29,7 +29,7 @@ The library is written in TypeScript, ships as an ES module, and includes type d
 
 You build everything with two functions:
 
-- **`animation(target, values, timing, options?)`** defines one animation: which elements, which values, and how it moves through them.
+- **`animation(target, values, timing)`** defines one animation: which elements, which values, and how it moves through them.
 - **`sequence()`** lays animations out in time, and nests other sequences.
 
 Both give you a **definition**. A definition doesn't play until you call `play()`, and you can play it as many times as you like.
@@ -70,7 +70,7 @@ cards.play({scope: archiveList});
 ## `animation`
 
 ```ts
-animation(target, values, timing, options?)
+animation(target, values, timing)
 ```
 
 | Argument | What it is |
@@ -78,7 +78,6 @@ animation(target, values, timing, options?)
 | `target` | The elements to animate. |
 | `values` | The CSS values each property moves through. |
 | `timing` | How long it takes, how it moves, when it starts and how it repeats. |
-| `options` | How its values combine with what's under them, and what it holds outside its active time. |
 
 It returns an `AnimationDefinition`. Nothing is looked up or read until you call `play()`.
 
@@ -121,7 +120,6 @@ animation('.card', {
 
 - **The value underneath** is what the property would show at that moment without this animation: the value an earlier animation leaves it at, or, with none, the property's current value when you call `play()`.
 - `null` stands for the value underneath. It's only allowed at the start or the end.
-- An animation that adds to what's under it (`composite: 'add'` or `'accumulate'`) adds nothing at a missing end.
 - Keys outside 0–1 throw.
 
 **Numbers and units.**
@@ -268,34 +266,20 @@ animation('.card', {translate: [40, 0], opacity: [0, 1]}, {
 
 The properties start together, and each runs on its own timing.
 
-### Options
-
-| Option | Meaning | Default |
-|---|---|---|
-| `composite` | How the values combine with what's under them: `'replace'`, `'add'` or `'accumulate'`, as in WAAPI. | `'replace'` |
-| `fill` | Whether it holds its start values before it starts and its end values after it ends: `'none'`, `'backwards'`, `'forwards'` or `'both'`, as in WAAPI. | what the overlap rules give it (see Overlaps) |
-
-```ts
-animation('.badge', {translate: [0, 12]}, {duration: 0.3}, {composite: 'add', fill: 'none'});
-```
-
-- **`fill: 'none'`** stops showing once it ends, so whatever is under it shows again.
-- **`fill: 'backwards'`** holds its start values even while an earlier animation runs.
-
 <br/><br/>
 
 ## `sequence`
 
 ```ts
 sequence()
-    .add(target, values, timing, options?)
+    .add(target, values, timing, placement?)
     .add(definition, placement?)
     .build(timingOptions?)
 ```
 
 A sequence lays **entries** out in time. An entry is an animation, written inline or as an `animation()` definition, or another sequence.
 
-- **Inline:** `add(target, values, timing, options?)` takes the same arguments as `animation()`. Its options also take the entry's placement: `{composite?, fill?, name?, at?}`.
+- **Inline:** `add(target, values, timing, placement?)` takes the same arguments as `animation()`, and the entry's placement: `{name?, at?}`.
 - **A definition:** `add(definition, placement?)` takes an `animation()` definition or a built sequence, with `{name?, at?}`.
 - **`build(timingOptions?)`** gives you a `SequenceDefinition`. It takes the sequence's own `delay`, which can be a stagger, and its repeat options.
 
@@ -410,10 +394,9 @@ sequence()
 When entries animate the same property of the same element:
 
 - The one added later shows over the earlier one while it runs.
-- An earlier entry that falls entirely within a later one never shows, unless the later one adds to it.
+- An earlier entry that falls entirely within a later one never shows.
 - Only the entry that starts first holds its start values before it starts.
 - An entry holds its end values after it ends, unless one added before it is still running.
-- An entry's `fill` overrides both.
 
 <br/><br/>
 
@@ -452,12 +435,12 @@ const reveal = SequenceTiming.builder()
 - **`build(timingOptions?)`** takes the same options as a sequence's `build`.
 - Builders are immutable here too.
 
-To play it, give `sequence()` the timing and a **mapping** of the same shape, keyed by entry name. Each node takes `target` and `values`, with `composite` and `fill` next to them, and a nested sequence timing takes a nested mapping:
+To play it, give `sequence()` the timing and a **mapping** of the same shape, keyed by entry name. Each node takes `target` and `values`, and a nested sequence timing takes a nested mapping:
 
 ```ts
 sequence(reveal, {
     title: {target: 'h1', values: {opacity: [0, 1], translate: [-40, 0]}},
-    subtitle: {target: 'h2', values: {opacity: [0, 1]}, fill: 'none'},
+    subtitle: {target: 'h2', values: {opacity: [0, 1]}},
     cta: {target: '#cta', values: {scale: [0.8, 1]}}
 }).play();
 ```
@@ -587,7 +570,7 @@ animation('.card', {opacity: [0, null], '--y': ['20px', null]}, {
 element.animate({opacity: [0, 1]}, {duration: 400, easing: 'ease-out', iterations: 3, direction: 'alternate', fill: 'forwards'});
 
 // timesfps
-animation(element, {opacity: [0, 1]}, {duration: 0.4, easing: 'easeOut', repeat: 2, repeatMode: 'reverse'}, {fill: 'forwards'}).play();
+animation(element, {opacity: [0, 1]}, {duration: 0.4, easing: 'easeOut', repeat: 2, repeatMode: 'reverse'}).play();
 ```
 
 | WAAPI | timesfps |
@@ -600,8 +583,7 @@ animation(element, {opacity: [0, 1]}, {duration: 0.4, easing: 'easeOut', repeat:
 | `direction: 'alternate'` | `repeatMode: 'reverse'` |
 | Keyframe `offset` | progress keys, which mean the same: positions along the eased progress |
 | A single keyframe | a single value |
-| `composite` | `composite` |
-| `fill` | `fill`; without it, the overlap rules decide what holds, and end values hold |
+| `fill` | none: the overlap rules decide what holds, and end values hold |
 | `animation.currentTime = ms` | `controls.seek(seconds)` |
 | `play()`, `pause()`, `cancel()`, `finish()`, `finished`, `playbackRate`, `startTime` | the same, in seconds |
 

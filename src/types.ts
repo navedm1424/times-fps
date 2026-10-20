@@ -7,7 +7,7 @@ export type Stagger = (index: number, total: number) => Seconds;
 export type RepeatMode = 'loop' | 'reverse' | 'mirror';
 
 export interface RepeatOptions {
-    repeatCount?: number;      // repetitions after the first play
-    repeatDelay?: Seconds;
+    repeat?: number;           // plays after the first
+    repeatDelay?: Seconds;     // between plays, never after the last
     repeatMode?: RepeatMode;
 }

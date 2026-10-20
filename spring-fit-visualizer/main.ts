@@ -130,7 +130,7 @@ function render(): void {
         const easing = animation.easing as SpringEasing;
         const {spring, duration} = easing;
         const target = document.createElement('div');
-        const targetValues = [{target, properties: {progress: {stops: PropertyStops.of('progress', {0: 0, 1: 1}), composite: 'replace' as const, allowedFill: 'both' as const}}}];
+        const targetValues = [{target, properties: {progress: {stops: PropertyStops.of('progress', {0: 0, 1: 1}), allowedFill: 'both' as const}}}];
         const [effect] = AnimationTracksResolver.resolve(resolveTimings(animation, 1), () => targetValues, plainNumberResolver).get(target)!.progress!;
         const {keyframes} = effect!;
         playableFit = {keyframes, easing: effect!.easing, duration};

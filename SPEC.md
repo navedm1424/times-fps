@@ -4,7 +4,7 @@ This document is for people working on the library. It covers what the library i
 
 The library lives in `src/`. Resolution tools that any adapter may use or not are in `src/resolution/`, the WAAPI adapter is in `src/waapi/`, and the tests are in `tests/`.
 
-> **Status.** §1–§3 describe the API surface as designed. The code still implements the previous surface (`animate`, `AnimationDefinition.of`, `Sequence.builder()` and mappings), and §4 onward describe the code as it is.
+> **Status.** The code implements §1–§3, except ending on the value underneath: a missing 1 takes the last given value for now (§3.4).
 
 ## 1. Purpose
 
@@ -284,23 +284,22 @@ class SequenceTiming {
     static builder(): SequenceTimingBuilder;
 }
 
-class SequenceTimingBuilder<Names extends string = never> {
-    add<N extends string>(
-        name: N,
-        timing: AnimationTiming | AnimationTimingDescriptor | SequenceTiming,
-        at?: At<Names>
-    ): SequenceTimingBuilder<Names | N>;
-    build(options?: SequenceTimingOptions): SequenceTiming;
+class SequenceTimingBuilder<SE extends SequenceTimingEntries = {}> {
+    add<N extends string>(name: N, timing: AnimationTiming | AnimationTimingDescriptor, at?: At<keyof SE & string>)
+        : SequenceTimingBuilder<SE & { [_ in N]: AnimationTimingEntry }>;
+    add<N extends string, NS extends SequenceTiming>(name: N, sequence: NS, at?: At<keyof SE & string>)
+        : SequenceTimingBuilder<SE & { [_ in N]: NestedSequenceTimingEntry<NS> }>;
+    build(options?: SequenceTimingOptions): SequenceTiming<SE>;
 }
 ```
 
 A sequence timing lays named timings out in time, without targets or values (`src/sequence.ts`).
 
-- **Names** are required, because a mapping refers to entries by name (§3.7). They're unique within their sequence, and can only contain letters, digits and underscores. So they can't contain `>`, and entry paths can't collide.
+- **Names** are required, because a mapping refers to entries by name (§3.6). They're unique within their sequence, and can only contain letters, digits and underscores. So they can't contain `>`, and entry paths can't collide.
 - **`add`** checks the name, parses the position and checks its references against the names so far, and makes a descriptor into an `AnimationTiming`, so all of these throw at the `add` that wrote them.
 - **Builders are immutable.** `add` returns a new builder with its own copy of the entries, so branches never share entries.
 - **`build`** validates and clamps the options as an animation timing's, and throws for a sequence without entries. The `SequenceTiming` constructor checks its names and positions again, so a sequence timing made without the builder is checked too.
-- **Entries** are kept in order as `names`, with `entries` keyed by name. Each is either a timing or a nested sequence timing, with its parsed position.
+- **Entries** are kept in order as `names`, with `entries` keyed by name. Each is `{timing, at}` (`AnimationTimingEntry`) or `{sequence, at}` (`NestedSequenceTimingEntry`), with its parsed position. The builder's and the timing's type parameter is the entries' type, so a mapping's type can mirror the tree (§3.6), and `At` takes its names.
 - **Nesting.** A nested sequence is one unit on the outer timeline. Its entries' positions only place them within it.
 
 #### 2.8.1 Positions (`At`)
@@ -336,10 +335,11 @@ sign      = '+' | '-'
 | `'title<'`, `'title<+50%'` | from `title`'s start |
 
 - **The type.** `At<Names>` is a template literal type over the names given so far, so positions can only refer to earlier names.
-- **The parsed form.** `parseAt` gives either an absolute time, or a relative position with:
-    - the reference: a name, the previous entry, or everything so far;
-    - the anchor: the start or the end;
-    - the offset and what it's measured in: seconds, a share of the referenced span, or a share of the inserted span.
+- **The parsed form.** `parseAt` gives either `{kind: 'absolute', time}`, or a relative position with:
+    - `reference`: `{kind: 'entry', name}`, `{kind: 'previous'}` or `{kind: 'everything-so-far'}`;
+    - `anchor`: `'start'` or `'end'`;
+    - `offset`, in seconds, or as a fraction for shares (`25%` is 0.25), and `offsetUnit`: `'seconds'`, `'referenced-span'` or `'inserted-span'`.
+- **Resolving** (`positionOf`, `src/resolution/timings.ts`): the reference's anchor plus the offset, which for shares is the fraction times the referenced span or the inserted entry's span. The inserted span comes from the entry's timings at position 0.
 - **These throw** at `add`:
     - a string that doesn't parse;
     - `=` without `%` (`'+=1'`);
@@ -387,7 +387,7 @@ A sequence whose `delay` is a stagger plays once per element index. The copy at 
 | One animation | `AnimationTiming` | `AnimationDefinition` | `AnimationControls` |
 | A sequence | `SequenceTiming` | `SequenceDefinition` | `AnimationControls` |
 
-- **A definition** is a timing bound to targets, values, `composite` and `fill`. It's everything needed to play, with no playback state. `Definition` is `AnimationDefinition | SequenceDefinition`.
+- **A definition** is a timing bound to targets and values. It's everything needed to play, with no playback state. `Definition` is `AnimationDefinition | SequenceDefinition`.
 - **`play()`** turns a definition into running animations and returns their controls. A definition can be played any number of times, in any scope.
 - **Definitions are DOM-bound:** targets are elements, and values are CSS. There's no engine parameter yet. Everything plays with WAAPI.
 - **Definitions are immutable,** and so are their builders.
@@ -399,15 +399,14 @@ A sequence whose `delay` is a stagger plays once per element index. The copy at 
 function animation<Values extends AnimationValues>(
     target: Target,
     values: Values,
-    timing: AnimationTiming | AnimationTimingDescriptor | PropertyTimings<Values>,
-    options?: AnimationDefinitionOptions
+    timing: AnimationTiming | AnimationTimingDescriptor | PropertyTimings<Values>
 ): AnimationDefinition;
 ```
 
 | When | What happens |
 |---|---|
-| `animation()` | The timing is made and validated, the values' forms are checked (§3.4), and the options are kept. All of these throw here. |
-| `play()` | The target is resolved in the scope, the values are read against each element, and the animations are created (§3.9). |
+| `animation()` | The timing is made and validated, and the values' forms are checked (§3.4). Both throw here. |
+| `play()` | The target is resolved in the scope, the values are read against each element, and the animations are created (§3.8). |
 
 **Telling the timing forms apart,** in order:
 1. An `AnimationTiming` instance.
@@ -418,10 +417,10 @@ function animation<Values extends AnimationValues>(
 
 ```ts
 type CSSSelector = string;
-type Target = Element | Element[] | CSSSelector | ((scope: Element) => Element | Element[]);
+type Target = Element | Element[] | CSSSelector | ((scope: Element) => Element | Iterable<Element>);
 ```
 
-- **Resolution** (`resolveTargets`, at `play`): a selector is `scope.querySelectorAll`, and a function is called with the scope and its result flattened.
+- **Resolution** (`resolveTargets`, at `play`): a selector is `scope.querySelectorAll`, and a function is called with the scope. A function can return one element or any iterable of them, such as a `NodeList`.
 - **Elements are deduplicated** in order. An element's index in that order is what staggers use: document order for a selector.
 - **No elements throws:** `"<selector>" matches no elements.`, or `The target has no elements.`
 
@@ -443,10 +442,9 @@ type AnimationValues = { [property: string]: ValueStops };
 | `{p: v, …}` | as keyed |
 | `null` at 0 or 1 | that stop is missing |
 
-- Keys outside 0–1 throw. `null` anywhere but the ends throws, and so does a list or object without values.
+- `progressStopsOf` (`src/waapi/mapping.ts`) turns the forms into stops. Keys outside 0–1 throw. `null` anywhere but the ends throws, and so does a list or object without values.
 - **A missing 0** is the value underneath as the entry starts: the value its track shows then (§5.6), or the property's current value when `play` is called.
-- **A missing 1** is the value underneath as the entry ends. §5.6 only resolves missing starts so far.
-- **For an entry that adds** (`composite: 'add'` or `'accumulate'`), a missing end is the neutral value, so it adds nothing there. That's what WAAPI synthesizes for a missing end keyframe of an additive effect. Where values pass through, missing ends stay missing keyframes for WAAPI to fill. Where the adapter writes keyframes between stops, it fills them the same way.
+- **A missing 1** is the value underneath as the entry ends. §5.6 only resolves missing starts so far, so a missing 1 takes the last given value for now (`PropertyStops.of`).
 - **Between stops,** the value is linear in the progress. Past the ends, as a spring overshoots, it continues the nearest segment.
 - **Properties** are camelCase. Custom properties are written as they are (`--like-this`). `float` and `offset` become `cssFloat` and `cssOffset` in keyframes (§5.8).
 - **Value types and units** come from `CSS.supports`, per property (§5.2).
@@ -461,23 +459,11 @@ type PropertyTimings<Values extends AnimationValues> = {
 ```
 
 - **Every property** in `values` needs a timing, and no other key is allowed. The type requires it, and the runtime throws for a missing or extra key.
-- **Under the hood,** it's a nested sequence with one entry per property, all starting together (`'<'`), on the same target, with the definition's options.
+- **Under the hood** (`propertySplitOf`, `src/definitions.ts`), it's a nested sequence with one entry per property, named `a`, `b`, … in the values' order, all starting together (`'<'`), on the same target. Its mapping node has `splitsProperties: true`.
 - **Animation `id`s** leave out the level this split adds, so they read as the definition's own path and the property.
 - It works for inline sequence entries too.
 
-### 3.6 Definition options
-
-```ts
-interface AnimationDefinitionOptions {
-    composite?: CompositeOperation;            // 'replace' by default
-    fill?: Exclude<FillMode, 'auto'>;
-}
-```
-
-- **`composite`** is WAAPI's, given to every effect of the entry.
-- **`fill`** is WAAPI's, for the entry as a whole. It overrides the fills the tracks give the entry at its ends (§5.5). Without it, the entry keeps the fills the tracks give it.
-
-### 3.7 `sequence()`
+### 3.6 `sequence()`
 
 ```ts
 function sequence(): SequenceDefinitionBuilder;
@@ -497,7 +483,7 @@ class SequenceDefinitionBuilder<Names extends string = never> {
         target: Target,
         values: Values,
         timing: AnimationTiming | AnimationTimingDescriptor | PropertyTimings<Values>,
-        options?: AnimationDefinitionOptions & EntryPlacementOptions<N, Names>
+        placement?: EntryPlacementOptions<N, Names>
     ): SequenceDefinitionBuilder<Names | N>;
 
     add<N extends string = never>(
@@ -510,20 +496,20 @@ class SequenceDefinitionBuilder<Names extends string = never> {
 ```
 
 - **Forms.** A first argument that's an `AnimationDefinition` or a `SequenceDefinition` is a definition entry. Otherwise it's inline. A target is never a definition, so `instanceof` decides, and argument shapes are never guessed.
-- **The inline form** is `add(animation(target, values, timing, options), placement)` flattened: the options are the definition's `composite` and `fill` and the entry's `name` and `at`.
+- **The inline form** is `add(animation(target, values, timing), placement)` flattened.
 - **At `add`:** a given name is checked as in §2.8, the position is parsed and checked against the names given so far, and an inline timing is made. All of these throw there.
 - **Names are optional.** Given names join `Names`, which types `at`. Entries without a name can't be referred to.
 - **Immutable:** each `add` returns a new builder with its own copy of the entries.
 - **`build`**:
     1. names the unnamed entries in order, as `a` to `z`, then `aa`, `ab` and on, skipping the names given;
-    2. compiles the entries into a `SequenceTiming` and a `SequenceMapping`, with each nested definition contributing its own timing and mapping;
+    2. compiles the entries into a `SequenceTiming` and a mapping tree (§3.8), with each nested definition contributing its own timing and mapping;
     3. validates and clamps the options;
     4. throws for a sequence without entries.
 
 **From a sequence timing.**
 
 ```ts
-interface AnimationMapping extends AnimationDefinitionOptions {
+interface AnimationMapping {
     target: Target;
     values: AnimationValues;
 }
@@ -536,20 +522,19 @@ type SequenceMapping<Timing extends SequenceTiming> = {
 ```
 
 - The mapping mirrors the timing's tree, keyed by entry name, with a nested mapping for each nested sequence timing.
-- Every entry must be mapped. The type requires it, and the runtime throws `No mapping present for "<path>".`
+- Every entry must be mapped. The type requires it, and `sequence()` throws `No mapping present for "<path>".` An animation entry's mapping without a target or values throws too, and its values are checked as `animation()`'s.
 - It returns a `SequenceDefinition`, the same as `build()`, so it can be played or added to another sequence.
 
-### 3.8 Overlaps
+### 3.7 Overlaps
 
 When entries animate the same property of the same element (§5.5):
 
 - The one declared later shows over the earlier one while it runs.
-- An earlier entry that falls entirely within a later one is dropped, unless the later one adds to it.
+- An earlier entry that falls entirely within a later one is dropped.
 - Only the entry that starts first holds its start values before it starts.
 - An entry holds its end values after it ends, unless one declared before it is still running.
-- An entry's `fill` overrides both.
 
-### 3.9 Playing
+### 3.8 Playing
 
 ```ts
 interface PlayOptions {
@@ -559,11 +544,13 @@ interface PlayOptions {
 definition.play(options?: PlayOptions): AnimationControls;
 ```
 
-- **Each `play`** resolves the targets in the scope, the values per element, the timings with the element counts, and the tracks, then calls `element.animate()` for each effect (§5).
+- **Each `play`** calls `WAAPIAnimator.play(timing, mapping, options)`, which resolves the targets in the scope, the values per element, the timings with the element counts, and the tracks, then calls `element.animate()` for each effect (§5).
+- **What a definition holds** (`mappedTiming`, `@internal`): its timing, an `AnimationTiming` or a `SequenceTiming`, and a **mapping tree** of the same shape, `MappingTree` (`src/waapi/mapping.ts`). Its leaves are `AnimationMapping`s, and each sequence is a `SequenceMappingNode`, `{entries, splitsProperties}`.
+- `AnimationDefinition` also exposes its `target`, `values` and `timing` (an `AnimationTiming`, or one per property). `SequenceDefinition` exposes its `timing`. Their constructors are `@internal`.
 - **It always starts playing.** There's no `autoplay`: pausing right after `play` shows no motion, because no frame renders in between.
-- **Animation `id`s** are the entry path and the property, `path:property`, or the property alone for an animation on its own. The path is the entry names leading to the leaf, joined by `>`.
+- **Animation `id`s** are the entry path and the property, `path:property`, or the property alone for an animation on its own. The path is the entry names leading to the leaf, joined by `>`, leaving out the names of entries inside a node that `splitsProperties`.
 
-### 3.10 Controls
+### 3.9 Controls
 
 `AnimationControls` (`src/waapi/controls.ts`) wraps the native `Animation`s of one play.
 
@@ -577,7 +564,7 @@ definition.play(options?: PlayOptions): AnimationControls;
 | `finished` | `Promise.all` of every animation's `finished`, resolving to `undefined`. A new promise on each access. It never settles while an animation repeats forever. |
 | `onFinish(listener)`, `onCancel(listener)` | Calls the listener each time every animation has dispatched that event since the last call. Returns a function that removes the listener from every animation. |
 | `animations` | The native `Animation`s, in creation order. |
-| `retarget` | `@internal`. Declared, with a stub body. |
+| `retarget` | `@internal`. Declared, with a stub that throws. |
 
 - **Animations hold their end values** after they end. Cancelling the controls lets go of them.
 - **`retarget` (planned):**
@@ -588,7 +575,7 @@ definition.play(options?: PlayOptions): AnimationControls;
 
   Interruptions are built on it.
 
-### 3.11 Exports
+### 3.10 Exports
 
 | Kind | Exports |
 |---|---|
@@ -596,7 +583,7 @@ definition.play(options?: PlayOptions): AnimationControls;
 | Classes | `AnimationTiming`, `SequenceTiming` |
 | Definitions and controls (types) | `AnimationDefinition`, `SequenceDefinition`, `Definition`, `SequenceDefinitionBuilder`, `SequenceTimingBuilder`, `AnimationControls`, `PlayOptions` |
 | Targets and values | `Target`, `CSSSelector`, `CSSValue`, `ValueStops`, `AnimationValues`, `PropertyTimings` |
-| Options and mappings | `AnimationDefinitionOptions`, `EntryPlacementOptions`, `AnimationMapping`, `SequenceMapping` |
+| Placement and mappings | `EntryPlacementOptions`, `AnimationMapping`, `SequenceMapping` |
 | Timing | `AnimationTimingDescriptor`, `AnimationTimingOptions`, `SequenceTimingOptions`, `RepeatOptions`, `RepeatMode`, `Stagger`, `StaggerOptions`, `At` |
 | Transitions | `TransitionDescriptor`, `EasedTransitionDescriptor`, `SpringTransitionDescriptor`, `DurationSpringTransitionDescriptor`, `VisualSpringTransitionDescriptor`, `PhysicalSpringTransitionDescriptor` |
 | Easings | `EasingDescriptor`, `CubicBezierEasingDescriptor`, `StepsEasingDescriptor`, `StepPosition`, `EasingFunction` |
@@ -611,21 +598,22 @@ definition.play(options?: PlayOptions): AnimationControls;
 | `src/easing.ts` | Easing descriptors and the windowed easing functions |
 | `src/cubic-bezier.ts` | Cubic Bézier math: coordinates, inverses, turning points, inflections, splitting |
 | `src/damped-spring.ts` | Closed-form damped springs in each damping regime: positions, turning times, rest time |
-| `src/transition.ts` | Transitions, their factories, checking them, and resolving them into a duration and an easing function |
-| `src/timing-options.ts` | `TimingOptions`, which animations and sequences share, and their clamps |
-| `src/stagger.ts` | `stagger` |
-| `src/animation.ts` | `AnimationDefinition`, `animation`, `SimpleAnimation` and `TimedTweenAnimation`, with validation and clamping |
+| `src/transition.ts` | Transition descriptors, telling their kinds apart, checking them, and resolving them into a duration and an easing function |
+| `src/timing-options.ts` | `AnimationTimingOptions` and `SequenceTimingOptions`, their checks and their clamps |
+| `src/stagger.ts` | `stagger` and `StaggerOptions` |
+| `src/animation.ts` | `AnimationTiming`, `AnimationTimingDescriptor`, `animationTimingOf` and `TimedTweenAnimation`, with validation and clamping |
 | `src/at.ts` | `At`, `parseAt` and the parsed form |
-| `src/sequence.ts` | `SequenceBuilder`, `Sequence` and its entries, with validation and clamping |
+| `src/sequence.ts` | `SequenceTimingBuilder`, `SequenceTiming` and its entries, with validation and clamping |
+| `src/definitions.ts` | `animation`, `sequence`, `AnimationDefinition`, `SequenceDefinition`, `SequenceDefinitionBuilder`, and splitting timings per property |
 | `src/utils/validation.ts` | `checkNumber` and `checkPositive` |
 | `src/utils/math.ts` | Interpolation and solving monotone functions |
 | `src/utils/records.ts` | Reading numeric-keyed records in order |
 | `src/resolution/timings.ts` | `computeTimings`: the timing tree, entry paths and staggered delays |
 | `src/resolution/stops.ts` | `PropertyStops` and `StopValue`: one property's values along the progress, resolved later |
 | `src/resolution/track-runs.ts` | `TrackSpan` and `TrackRun`: a track's values over time, and their iterations |
-| `src/waapi/animator.ts` | `animate`, `sequence` and `WAAPIAnimator`, which runs every step and creates the native animations |
+| `src/waapi/animator.ts` | `WAAPIAnimator`, which runs every step and creates the native animations, and `PlayOptions` |
 | `src/waapi/controls.ts` | `AnimationControls`: playing, pausing, seeking and listening to the native animations together |
-| `src/waapi/mapping.ts` | Mapping types, `AllowedFill`, and resolving targets |
+| `src/waapi/mapping.ts` | Targets, value forms, mapping types, the mapping tree, and resolving targets |
 | `src/waapi/css-values.ts` | CSS property names, value types, each target's stops as CSS text, and the page's value resolver |
 | `src/waapi/effect-chains.ts` | The values stage: effect chains, and resolving their values to numbers in one unit |
 | `src/waapi/tracks.ts` | `AnimationTracksResolver`: repetitions, fill conflicts and values, over track runs |
@@ -638,12 +626,12 @@ definition.play(options?: PlayOptions): AnimationControls;
 ## 5. Adaptation flow
 
 ```
-animate(definition, mapping, {scope = document.documentElement, autoplay = true})
+WAAPIAnimator.play(timing, mappingTree, {scope = document.documentElement})
 │
 ├─ 1. Targets      resolveTargets                → Element[] per animation leaf
-├─ 2. Values       resolveTargetValues           → TargetValues[] per leaf (stops as CSS text, composite, allowed fill)
+├─ 2. Values       resolveTargetValues           → TargetValues[] per leaf (stops as CSS text)
 │                  target counts per leaf
-├─ 3. Timings      computeTimings(definition, counts)   → AnimationTimings | SequenceTimings | StaggeredSequenceTimings tree
+├─ 3. Timings      computeTimings(timing, counts)   → AnimationTimings | SequenceTimings | StaggeredSequenceTimings tree
 ├─ 4. Tracks       AnimationTracksResolver.resolve(timings, valuesOf, domValueResolver)
 │     ├─ a. repetitions    → ScheduledEffect[]  (spans per target and property)
 │     ├─ b. fill conflicts → PlacedEffect[]    (dropped effects, fill modes)
@@ -654,7 +642,7 @@ animate(definition, mapping, {scope = document.documentElement, autoplay = true}
                    → AnimationControls
 ```
 
-When the adapter is given a single animation, it skips the per-leaf maps and resolves one `TargetValues[]`. When it's given a sequence, every animation leaf is keyed by its **entry path**: the names leading to it joined by `>`, such as `intro>logo>fade`. Names can't contain `>`, so paths can't collide. Sequences have no targets or values, so only leaves have keys.
+When the adapter is given a single animation timing, it skips the per-leaf maps and resolves one `TargetValues[]`. When it's given a sequence, every animation leaf is keyed by its **entry path**: the names leading to it joined by `>`, such as `intro>logo>fade`. Names can't contain `>`, so paths can't collide. Sequences have no targets or values, so only leaves have keys.
 
 ### 5.1 Targets
 
@@ -706,11 +694,11 @@ Sequences apply their repetition to their children's runs after resolving all of
 |---|---|
 | No repeat | the run |
 | No repeat delay, not mirror, the run fills the iteration | the run × playCount, `alternate` for reverse |
-| Loop | [run + hold to `a + P`] × repeatCount, then the run on its own; × ∞ alone when infinite |
+| Loop | [run + hold to `a + P`] × repeat, then the run on its own; × ∞ alone when infinite |
 | Reverse/mirror, infinite | [run + hold, flipped + hold] × ∞ |
-| Reverse/mirror, odd play count | [run + hold, flipped + hold] × repeatCount/2, then the run on its own |
+| Reverse/mirror, odd play count | [run + hold, flipped + hold] × repeat/2, then the run on its own |
 | Reverse/mirror, two plays | [run + hold, flipped] on its own |
-| Reverse/mirror, even play count | [run + hold, flipped + hold] × (repeatCount−1)/2, then [run + hold, flipped] on its own |
+| Reverse/mirror, even play count | [run + hold, flipped + hold] × (repeat−1)/2, then [run + hold, flipped] on its own |
 
 The last play never ends with a hold. The first effect starts at the run's start, so the sequence's start hold is covered by the native delay. The holds between iterations, `[endHold + repeatDelay + startHold]`, are in the keyframes.
 
@@ -720,10 +708,9 @@ The last play never ends with a hold. The first effect starts at the run's start
 
 Per target and property, in declaration order:
 
-- **Drop:** an effect that lies entirely within the active span of one declared later, which replaces what's under it, never shows, so it's dropped. This removes an infinite entry's continuation inside an infinitely repeating sequence. A later effect that adds to what's under it drops nothing.
+- **Drop:** an effect that lies entirely within the active span of one declared later never shows, so it's dropped. This removes an infinite entry's continuation inside an infinitely repeating sequence.
 - **Backwards:** only the effects that start first fill backwards.
 - **Forwards:** an effect fills forwards unless an effect declared before it runs on after it ends.
-- **Mapped:** a mapping's `fill` overrides the backwards fill of its entry's first-starting effect and the forwards fill of its last-ending one. The entry's other effects only keep the fills it has, so none of them shows past the entry's ends. An entry is split into several effects by the native layout, so overriding every effect would let a later part fill over an earlier one.
 
 An effect's end is its delay plus its active duration, which is 0 for an effect of 0 seconds, whatever its iterations.
 
@@ -735,9 +722,8 @@ Entries are never merged. Two entries on the same property of the same target in
 
 **Chains.** The track's entries are taken in order of their first start, and of declaration when they start together.
 - An entry with a value at 0 starts a chain.
-- An entry without one depends on the effect showing at its start. That's the last-declared effect of an earlier entry that replaces what's under it and shows a value then, as WAAPI works it out from its delay, iterations, direction and fill. The entry joins that effect's chain.
+- An entry without one depends on the effect showing at its start. That's the last-declared effect of an earlier entry that shows a value then, as WAAPI works it out from its delay, iterations, direction and fill. The entry joins that effect's chain.
 - With no such effect, it starts a chain from the property's current value.
-- An entry that adds to what's under it always has a value at 0, and never counts as showing for another.
 
 **Starts.** In order, each entry without a value at 0 adopts a text: the property's current value for a chain's first entry, or the stop value its effect shows at its start. That's a stop's when the effect is at a whole span's end, or anywhere through a hold. Between stops there's no text, and the start only gets a number, below.
 
@@ -776,13 +762,10 @@ Each syntax has two probes with different initial values. A value that the synta
 For each target, property and effect, in order, the adapter calls `element.animate()`:
 - keyframe values are their CSS text;
 - times are converted to milliseconds;
-- the effect's `composite` is its entry's;
 - `float` and `offset` become `cssFloat` and `cssOffset`, since `offset` is the keyframe's own;
-- the animation's `id` is its entry path and property, `path:property`, or the property alone for an animation on its own.
+- the animation's `id` is its entry path and property, `path:property`, or the property alone for an animation on its own (§3.8).
 
-Without `autoplay`, every animation is paused as it's created.
-
-`animate` returns an `AnimationControls` over the native `Animation`s. It plays, pauses, cancels, finishes and seeks all of them together, and sets their playback rate and start time, in seconds. `finished` settles once they all have. `onFinish` and `onCancel` call a listener each time every animation has dispatched that event, and return a function that removes it.
+`play` returns an `AnimationControls` over the native `Animation`s. It plays, pauses, cancels, finishes and seeks all of them together, and sets their playback rate and start time, in seconds. `finished` settles once they all have. `onFinish` and `onCancel` call a listener each time every animation has dispatched that event, and return a function that removes it.
 
 ## 6. Decisions
 
@@ -802,7 +785,7 @@ Without `autoplay`, every animation is paused as it's created.
 | Values resolved per target, through probes | Relative units depend on the element; probes are untouched by animations and give absolute values |
 | Values resolved after the fill conflicts | A missing 0 depends on which effect shows at the entry's start, and only interpolation needs numbers |
 | Constructors validate and clamp | Every way of making a definition is checked, not only the factories |
-| Tracks per target and property | WAAPI composites per property, and units differ between entries |
+| Tracks per target and property | WAAPI stacks effects per property, and units differ between entries |
 | Only the outermost repeat is native | WAAPI iterations can't nest |
 | Infinite inner repeats: first iteration plus a continuing effect | The ancestor's repeat shows over it, and it carries on once the ancestor ends |
 | Fill rules instead of merging entries | Keeps entries independent; conflicts inside natively repeating sequences are accepted |
@@ -811,7 +794,7 @@ Without `autoplay`, every animation is paused as it's created.
 
 ## 7. Testing
 
-`tests/tracks.test.ts` simulates how WAAPI computes and composites effects:
+`tests/tracks.test.ts` simulates how WAAPI computes effects and shows them over each other:
 - iterations and directions;
 - fills;
 - keyframe intervals;
@@ -822,10 +805,13 @@ It compares the result with the definitions' own math, sampled at times that mis
 
 The cases cover single animations, sequence loops, reverses and mirrors with offset entries, and inner repeats baked inside outer ones. Easings are cubic Bézier (including overshoot), jump-start and jump-end steps, and springs. Layout, timing, fill and drop cases are checked exactly.
 
+`tests/animation.test.ts` covers timings: validation and clamping, telling transition kinds apart, splitting descriptors, and staggers. `tests/sequence.test.ts` covers positions (parsing, and resolving shares and `>>`), sequence timings, value forms, and definitions: naming, immutability, property splits and mapping trees.
+
 Effect chains are tested through a stand-in `CSSValueResolver` that takes plain numbers and gives every property a current value of 0.25. The DOM-dependent parts (targets, `domValueResolver`, probes and `element.animate`) have no tests yet, because the tests run without a DOM.
 
 ## 8. Limitations and open work
 
+- **Ending on the value underneath.** A missing 1 takes the last given value (§3.4), until §5.6 resolves it.
 - **Timed tween animations** exist as `TimedTweenAnimation`, which is internal and can't be placed in a sequence or played yet.
 - **The before flag.** Only an effect's own easing gets WAAPI's before flag. So an effect whose first keyframe starts with a jump, such as jump-start steps split by a stop or a reversed jump-end, shows the jumped value during its backwards fill.
 - **Continuations jump.** An infinite entry's continuation shows at whatever phase it has reached when it's uncovered.

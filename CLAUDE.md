@@ -12,7 +12,6 @@
     1. Targets: one element, many elements, a selector, or a function that derives them from the scope.
     2. Values, and what each form of them means.
     3. Timing: transitions and easings.
-    4. Options.
 4. `sequence`, and how it works.
 5. Only once both functions are covered: the timing models, that both functions also take these reusable timing objects, and how each one is created.
 6. The controls.

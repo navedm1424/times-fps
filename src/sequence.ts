@@ -1,108 +1,101 @@
-import {AnimationDefinition, animationOf, type SimpleAnimation, type TimedTweenAnimation, type TransitionAndOptions} from "./animation.js";
+import {AnimationTiming, type AnimationTimingDescriptor, animationTimingOf, type TimedTweenAnimation} from "./animation.js";
 import {type At, type ParsedAt, parseAt} from "./at.js";
-import {clampedDelay, clampedRepeats, type TimingOptions} from "./timing-options.js";
+import {checkTimingOptions, clampedDelay, clampedRepeats, type SequenceTimingOptions} from "./timing-options.js";
 import {checkNumber} from "./utils/validation.js";
 
-export interface SimpleAnimationEntry<N extends string = string> {
-    animation: SimpleAnimation;
+export interface AnimationTimingEntry<N extends string = string> {
+    timing: AnimationTiming;
     at: ParsedAt<N>;
 }
-export interface NestedSequenceEntry<NS extends Sequence = Sequence, N extends string = string> {
+export interface SubsequenceTimingEntry<NS extends SequenceTiming = SequenceTiming, N extends string = string> {
     sequence: NS;
     at: ParsedAt<N>;
 }
 
-export type SequenceEntry = SimpleAnimationEntry | NestedSequenceEntry;
+export type SequenceTimingEntry = AnimationTimingEntry | SubsequenceTimingEntry;
 
-export type SequenceEntries = {
-    readonly [name: string]: SequenceEntry;
+export type SequenceTimingEntries = {
+    readonly [name: string]: SequenceTimingEntry;
 };
 
-export class SequenceBuilder<SE extends SequenceEntries = {}> {
-    private readonly names: string[] = [];
-    private readonly entries: { [name: string]: SequenceEntry } = {};
+/** Builds a sequence timing; every `add` gives a new builder, so branches never share entries. */
+export class SequenceTimingBuilder<SE extends SequenceTimingEntries = {}> {
+    constructor(
+        private readonly names: readonly string[] = [],
+        private readonly entries: SequenceTimingEntries = {}
+    ) {}
 
     add<N extends string>(
         name: N,
-        animation: SimpleAnimation | TransitionAndOptions,
+        timing: AnimationTiming | AnimationTimingDescriptor,
         at?: At<keyof SE & string>
-    ): SequenceBuilder<SE & { [_ in N]: SimpleAnimationEntry<keyof SE & string> }>;
+    ): SequenceTimingBuilder<SE & { [_ in N]: AnimationTimingEntry<keyof SE & string> }>;
 
     // add<N extends string, A extends TimedTweenAnimation<string[]>>(
     //     name: N,
     //     animation: A,
     //     at?: At<keyof SE & string>
-    // ): SequenceBuilder<SE & { [_ in N]: TimedTweenAnimationEntry<A, keyof SE & string> }>;
+    // ): SequenceTimingBuilder<SE & { [_ in N]: TimedTweenAnimationEntry<A, keyof SE & string> }>;
 
-    add<N extends string, NS extends Sequence>(
+    add<N extends string, NS extends SequenceTiming>(
         name: N,
         sequence: NS,
         at?: At<keyof SE & string>
-    ): SequenceBuilder<SE & { [_ in N]: NestedSequenceEntry<NS, keyof SE & string>; }>;
+    ): SequenceTimingBuilder<SE & { [_ in N]: SubsequenceTimingEntry<NS, keyof SE & string>; }>;
 
     add<N extends string>(
         name: N,
-        definition: SimpleAnimation | Sequence | TransitionAndOptions,
+        timing: AnimationTiming | AnimationTimingDescriptor | SequenceTiming,
         at?: At<string>
-    ): SequenceBuilder<SE & { [_ in N]: SequenceEntry }> {
-        if (Object.hasOwn(this.entries, name))
-            throw new Error(`An entry named "${name}" already exists in this sequence.`);
-        checkName(name);
-        const parsedAt = parseAt(at ?? '+0');
+    ): SequenceTimingBuilder<SE & { [_ in N]: SequenceTimingEntry }> {
+        checkNewName(name, this.names);
+        const parsedAt = parseAt(at ?? '>');
         checkPosition(`Entry "${name}"`, parsedAt, this.names);
 
-        this.names.push(name);
-        const placement = {at: parsedAt};
-        if (definition instanceof Sequence)
-            this.entries[name] = {sequence: definition, ...placement};
-        else if (definition instanceof AnimationDefinition)
-            this.entries[name] = {animation: definition, ...placement};
-        else
-            this.entries[name] = {animation: animationOf(definition), ...placement};
-
-        return this;
+        const entry: SequenceTimingEntry = timing instanceof SequenceTiming
+            ? {sequence: timing, at: parsedAt}
+            : {timing: animationTimingOf(timing), at: parsedAt};
+        return new SequenceTimingBuilder([...this.names, name], {...this.entries, [name]: entry});
     }
 
-    build(options: SequenceOptions = {}): Sequence<{ [K in keyof SE]: SE[K] }> {
-        return new Sequence([...this.names], {...this.entries} as { [K in keyof SE]: SE[K] }, options);
+    build(options: SequenceTimingOptions = {}): SequenceTiming<{ [K in keyof SE]: SE[K] }> {
+        return new SequenceTiming(this.names, this.entries as { [K in keyof SE]: SE[K] }, options);
     }
 }
 
-export type SequenceOptions = TimingOptions;
-
-export class Sequence<SE extends SequenceEntries = SequenceEntries> {
-    readonly options: SequenceOptions;
+/** Named timings laid out in time, without targets or values. */
+export class SequenceTiming<SE extends SequenceTimingEntries = SequenceTimingEntries> {
+    readonly options: SequenceTimingOptions;
 
     constructor(
         readonly names: readonly string[],
         readonly entries: SE,
-        options: SequenceOptions = {}
+        options: SequenceTimingOptions = {}
     ) {
         if (names.length === 0)
             throw new Error("A sequence needs at least one entry.");
         names.forEach((name, index) => {
             const earlierNames = names.slice(0, index);
-            if (earlierNames.includes(name))
-                throw new Error(`An entry named "${name}" already exists in this sequence.`);
-            checkName(name);
-            const entry: SequenceEntry | undefined = entries[name];
+            checkNewName(name, earlierNames);
+            const entry: SequenceTimingEntry | undefined = entries[name];
             if (!entry) throw new Error(`The sequence has no entry named "${name}".`);
             checkPosition(`Entry "${name}"`, entry.at, earlierNames);
         });
 
-        if (typeof options.delay === 'number') checkNumber(options.delay, "The sequence's delay");
-        checkNumber(options.repeatDelay, "The sequence's repeat delay");
-        checkNumber(options.repeatCount, "The sequence's repeat count", {allowInfinity: true});
+        checkTimingOptions(options, "The sequence");
         this.options = clampedDelay(clampedRepeats(options));
     }
 
-    static builder(): SequenceBuilder {
-        return new SequenceBuilder();
+    static builder(): SequenceTimingBuilder {
+        return new SequenceTimingBuilder();
     }
 }
 
-export function checkName(name: string): void {
-    if (/\W/.test(name))
+/** A name must be unique among the entries before it, and only contain letters, digits and underscores. */
+export function checkNewName(name: string, earlierNames: readonly string[]): void {
+    if (earlierNames.includes(name))
+        throw new Error(`An entry named "${name}" already exists in this sequence.`);
+    if (!/^\w+$/.test(name))
         throw new Error(`The entry name "${name}" can only contain letters, digits and underscores.`);
 }
 
@@ -113,6 +106,6 @@ export function checkPosition(entry: string, at: ParsedAt<string>, earlierNames:
         return;
     }
     checkNumber(at.offset, `${entry}'s position offset`);
-    if (at.reference !== undefined && !earlierNames.includes(at.reference))
-        throw new Error(`${entry}'s position refers to "${at.reference}", which isn't an earlier entry.`);
+    if (at.reference.kind === 'entry' && !earlierNames.includes(at.reference.name))
+        throw new Error(`${entry}'s position refers to "${at.reference.name}", which isn't an earlier entry.`);
 }
