@@ -1,167 +1,606 @@
 # TimesFPS: Implementation Spec
 
-This document is for people working on the library. It covers the concepts the API is built on, how the code is laid out, how a definition becomes running WAAPI animations, and why things are the way they are.
+This document is for people working on the library. It covers what the library is for, its API surface, how the code is laid out, how a definition becomes running WAAPI animations, and why things are the way they are.
 
 The library lives in `src/`. Resolution tools that any adapter may use or not are in `src/resolution/`, the WAAPI adapter is in `src/waapi/`, and the tests are in `tests/`.
 
+> **Status.** §1–§3 describe the API surface as designed. The code still implements the previous surface (`animate`, `AnimationDefinition.of`, `Sequence.builder()` and mappings), and §4 onward describe the code as it is.
+
 ## 1. Purpose
 
-Definitions describe animations without knowing what they animate. A definition says how long each change takes, how it progresses, when it happens relative to other changes, and how often it happens. It never names values, properties or targets.
+### 1.1 What it is
 
-Work happens in two phases:
+TimesFPS is a library for designing animations, meaning their timing, motion and choreography, in a form that's easy to write and portable across conventions and engines.
 
-1. **Definition.** Animations and sequences are built from transitions, repeat options and positions. Definitions are engine-agnostic and reusable.
-2. **Adaptation.** An adapter takes a definition plus a **mapping**, which supplies targets and values, and plays it on an engine. The only adapter so far is the WAAPI one, behind `animate`.
+- **Timing is its own model.** A timing says how a change from 0 to 1 unfolds in time. It never names targets, properties or values, so one timing can be bound to any elements and values, and later run on any engine.
+- **Definitions bind timing to targets and values.** A definition has no playback state. Playing it creates the running animations and returns their controls.
 
-One definition can drive any number of targets and properties, and can be placed many times in a sequence.
+### 1.2 Why it exists
 
-## 2. Concepts
+Native animations (WAAPI and CSS) run without JavaScript per frame, but they leave the hard parts of motion design to you:
 
-### 2.1 A change goes from 0 to 1
+| Native animations | TimesFPS |
+|---|---|
+| No way to design a sequence, and no ergonomic API for choreographing complex ones | `sequence()`: named entries, positions relative to any earlier entry, shares of entries, nesting and staggered sequences |
+| No fluid spring motion. `linear()` samples a spring into straight segments, which shows as facets with few points and grows long with many | Springs fitted as cubic Bézier keyframes that follow the closed-form motion within `PRECISION` (0.001) |
+| No interruptibility, and a spring that can't be interrupted loses most of its point | Retargeting from the current value and velocity (`retarget`: declared, not implemented yet) |
+| No repeat delays | `repeatDelay`, on animations and sequences |
+| Alternating, but no mirroring | `repeatMode: 'mirror'`: values swap, easing runs forwards |
+| Repeats can't nest | Repeats compound through nested sequences |
 
-Every change is a progression from **0 to 1**. The definition only knows that something goes from 0 to 1. The mapping decides what 0, 1 or 0.5 mean.
+### 1.3 Where it's going
+
+- **Adapters for Motion and GSAP.** The same timing and choreography run on either library by changing one parameter, possibly per entry.
+- **A readonly sequence tree,** so callers and adapters can read particular entries.
+- **Other engines,** later.
+- **The focus now** is DOM-based animations played with WAAPI.
+
+### 1.4 Principles
+
+- **Open to extension, closed to modification.** New transitions, engines and adapters are added beside what exists, without changing it:
+    - each transition kind has a required key no other kind has, so a new kind never changes how existing ones are told apart (§2.2);
+    - the timing model never refers to targets, values or engines.
+- **Mistakes throw where they're made.** Factories, constructors and builders validate and clamp, so an invalid timing, position or name throws at the call that wrote it.
+- **Definitions are values.** Timings, definitions and builders are immutable: every `add` returns a new builder.
+
+## 2. The Timing Model
+
+Everything here is value-free: it describes how a change from 0 to 1 unfolds in time.
+
+### 2.1 Units
 
 | Type | Meaning |
 |---|---|
-| `Seconds` | Time |
-| `Progress` | A position on the 0→1 change axis; a spring or an overshooting cubic Bézier can pass beyond it |
+| `Seconds` | Time. Every public time is in seconds. The WAAPI adapter converts to milliseconds only when it calls `element.animate()`. |
+| `Progress` | A position on the 0→1 change axis. A spring or an overshooting cubic Bézier can pass beyond it. |
 
-### 2.2 Transitions
+- **The definition only knows that something goes from 0 to 1.** The values decide what 0, 0.5 and 1 mean.
+- **`PRECISION`** (0.001, `src/constants.ts`) is how close two progresses must be to count as the same. It's the rest threshold of every spring without its own `restDelta`, and the precision every fitted curve keeps.
 
-A transition gives one play its duration and its shape (`src/transition.ts`).
+### 2.2 Transition descriptors
 
-- **Eased:** `eased(duration, easing?)`. `EasingDescriptor` is a preset (`'linear'`, `'ease'`, `'easeIn'`, `'easeOut'`, `'easeInOut'`), a cubic Bézier `[x1, y1, x2, y2]`, or steps `[count, position?]`. The step positions are `jumpStart`, `jumpEnd` (the default), `jumpNone` and `jumpBoth`.
-- **Springs:** `spring(...)`, in three forms that all have `type: 'spring'`:
-  - **Physical:** `stiffness`, `damping` and optional `mass`, `velocity` and `restDelta`. Its duration is how long it takes to come to rest.
-  - **Duration:** a `duration` and a `bounce`. The spring is solved so that it comes to rest exactly at that duration.
-  - **Visual:** a `visualDuration` and a `bounce`. `visualDuration` sets how fast it swings, and the spring runs on until it comes to rest.
-
-  A bounce maps to a damping ratio the way Apple's springs do: a positive bounce lowers the ratio from 1, and a negative one raises it past 1.
-
-Spring quantities are in progress units: `velocity` is progress per second, and `restDelta` is a `Progress`. This is sound because a spring's motion is linear in its distance: a spring from 0 to 1 is a scaled copy of the same spring between any two values. The default rest threshold, and the precision every fitted curve must keep, is `PRECISION` (0.001, `src/constants.ts`).
-
-### 2.3 Easing functions
-
-Definitions resolve their transition as soon as they're created. `SimpleAnimation` has `duration` and `easing`, where `easing` is an `EasingFunction` (`src/easing.ts`). There's one class per kind: `LinearEasing`, `CubicBezierEasing`, `StepsEasing` and `SpringEasing`.
-
-An easing function is pure math over its input time, from 0 to 1, limited to a **window** from `windowStart` to `windowEnd`:
-
-- **Offsets** are fractions of the window, and the progress isn't rescaled to it. A window from 0.25 to 0.75 of `linear` gives a progress from 0.25 to 0.75.
-- **A window runs backwards** when `windowEnd` comes before `windowStart`. `reversed()` swaps them.
-- **`windowed(start, end)`** cuts a sub-window. Splitting an easing is always done by cutting windows, never by building new curves.
-- **The math.** Each function gives its progress at an offset, the offsets where its progress turns back, the offsets where it reaches a given progress, and `startProgress`/`endProgress`.
-- **`startProgress` and `endProgress`** are the progress the window starts from and ends at, before or after any jump right at an edge. They only differ from the output at offsets 0 and 1 for steps: CSS steps are right-continuous, so a jump-start easing already outputs 1/n at time 0, but it starts *from* 0.
-- **A `SpringEasing`** is the spring's closed-form motion over its duration. It closes the gap left at the end evenly after the last turning point, so it ends at exactly 1.
-
-Creating a definition validates its transition and easing: an eased duration can't be negative; spring durations, stiffness, damping and mass must be positive, `bounce` must be between -1 and 1, and `restDelta` between 0 and 1, so every spring that reaches `DampedSpring` has a positive natural frequency and damping ratio; cubic Bézier x handles must be within 0–1, and steps need a whole count of at least 1 (2 for `jumpNone`).
-
-### 2.4 Repeat options
+A transition descriptor shapes one play: its duration, and how its progress moves (`src/transition.ts`).
 
 ```ts
-interface RepeatOptions {
-    repeatCount?: number;      // repetitions after the first play
-    repeatDelay?: Seconds;     // between plays, never after the last
-    repeatMode?: 'loop' | 'reverse' | 'mirror';
-}
+type TransitionDescriptor = EasedTransitionDescriptor | SpringTransitionDescriptor;
+type SpringTransitionDescriptor =
+    | DurationSpringTransitionDescriptor
+    | VisualSpringTransitionDescriptor
+    | PhysicalSpringTransitionDescriptor;
 ```
 
-- `loop`: every play runs forwards.
-- `reverse`: every other play runs backwards in time, so its easing runs backwards too.
-- `mirror`: every other play flips the progress (`1 − progress`) and keeps the easing running forwards. This usually suits springs, because a spring played backwards starts wobbly and ends calm.
+| Kind | Fields | Told apart by |
+|---|---|---|
+| Eased | `duration: Seconds`, `easing?: EasingDescriptor` | the fallback: a `duration` without `bounce` |
+| Duration spring | `duration: Seconds`, `bounce: number`, `velocity?: number` | `bounce` with `duration` |
+| Visual spring | `visualDuration: Seconds`, `bounce: number`, `velocity?: number` | `visualDuration` |
+| Physical spring | `stiffness`, `damping`, `mass?`, `velocity?`, `restDelta?: Progress` | `stiffness` and `damping` |
 
-For a sequence, `reverse` reverses the whole iteration in time. `mirror` does the same but keeps each animation's easing running forwards through flipped values.
+**Telling kinds apart.**
+- There's no `type` field. Kinds are told apart by their keys.
+- Each kind declares the other kinds' keys as `?: never`, so a literal that mixes kinds is a type error. TypeScript's excess property check wouldn't catch it on its own: for a union without a discriminant, it only checks that each property exists in some member.
+- Code narrows with `!== undefined` on a kind's key. `in` doesn't narrow when every member declares the key.
+- At runtime, the kind is: physical with `stiffness` or `damping`, visual with `visualDuration`, the duration spring with `bounce`, and eased otherwise. A key from any other kind throws, for JavaScript callers and casts.
+- **Extension rule:** a new kind needs a required key no other kind has. Eased stays the fallback, so `bounce` must stay required.
+- There are no `eased()` or `spring()` factories: the fields are clearer written out.
 
-`Infinity` is a valid `repeatCount` on animations and sequences, including an infinite entry inside an infinitely repeating sequence. A timed tween's `repeatCount` must be finite.
+**Validation** (`checkTransition`, on every way a timing is made):
 
-### 2.5 Animations
-
-`AnimationDefinition.of` and `animation` make animations. The name avoids shadowing the DOM's `Animation`, which the adapter returns.
-
-- **`AnimationDefinition.of(transition, options?)`** gives a `SimpleAnimation`: one play.
-- **`TimedTweenAnimation`** is tweens that run one after another, each with its own transition, delay and finite repeats. It's internal: sequences can't hold it yet, nothing handles it, and its declarations are stripped from the build.
-- **`animationOf({...transition, ...options})`** splits a transition given together with its options, for the places that take either.
-
-`AnimationOptions` are `TimingOptions`: the repeat options plus `delay: Seconds | Stagger`. The delay waits before the first play and isn't repeated. Animations have no name: they get one when they're placed in a sequence.
-
-The constructors validate and clamp, so every way of making an animation does. `SimpleAnimation` is exported as a type only. The checks:
-- delays, repeat delays and transition durations must be finite numbers, and durations can't be negative;
-- `repeatCount` must be a number, and may be `Infinity`;
-- negative delays, repeat delays and repeat counts become 0, and fractional repeat counts round down.
-
-### 2.6 Sequences
-
-`Sequence.builder().add(name, animationOrSequence, at?) … .build(options?)`
-
-- **Names** are unique within their sequence and can only contain letters, digits and underscores. The name is the entry's identity: positions and the mapping refer to entries by name.
-- **Entries** are an animation, a transition with its animation's options spread into it, or a sequence.
-- **Positions** are parsed as entries are added, and the parsed form is stored on the entry. A position that can't be parsed, whose time isn't finite, or that refers to an entry that isn't an earlier one throws there.
-- **Options** are `TimingOptions`, as an animation's: the repeat options plus a `delay`, in seconds or a stagger. The `Sequence` constructor validates and clamps them like an animation's, throws for a sequence without entries, and checks its names and positions again, so a sequence made without the builder is checked too. Each built sequence keeps its own copy of the entries, so the builder can go on without changing it. Builders are mutable, though: `add` changes the builder and returns it, so branches added to one builder both end up in it, and the docs say so.
-- **Nesting.** A sequence can be an entry of another. It's one unit on the outer timeline, and its entries' positions only place them within it.
-
-#### Positions (`at`)
-
-| Form | Meaning |
+| Field | Rule |
 |---|---|
-| `n` | Absolute time from the start of the sequence's iteration |
-| `+n` / `-n` | From the previous entry's last referenceable end |
-| `<+n` / `<-n` | From the previous entry's first start; `<` alone is `<+0` |
-| `name+n` / `name-n` | From the named entry's last referenceable end |
-| `name<+n` / `name<-n` | From the named entry's first start; `name<` alone is `name<+0` |
+| Eased `duration` | A finite number, at least 0. 0 jumps straight to the end values. |
+| Spring `duration`, `visualDuration`, `stiffness`, `damping`, `mass` | A finite number above 0. |
+| `bounce` | Strictly between -1 and 1. |
+| `velocity` | A finite number. |
+| `restDelta` | Strictly between 0 and 1. |
+| `easing` | As in §2.3. |
 
-- An omitted `at` means `'+0'`. The first entry's "previous" point is the start of the sequence.
-- Named references can only point at earlier entries. The types enforce this, and references never reach into nested sequences.
-- A position that resolves below 0 becomes 0.
-- **The first start** is the position plus the delay: the shortest staggered delay for an animation, or the sequence's delay for a sequence. References to an entry's start resolve to its first start.
-- **The last referenceable end:**
-  - For a finite entry, it's its end, after its delay and all its repeats.
-  - For an infinite entry, it's the end of its first iteration, since infinity can't be referenced.
-  - A staggered animation's comes from its latest target.
-  - A sequence's comes from its iterations: each one lasts until the latest last referenceable end among its entries.
-  - A staggered sequence's comes from its latest copy.
+So every spring that reaches `DampedSpring` has a positive natural frequency and damping ratio.
 
-#### Staggered sequences
+**Resolution** (`resolveTransition`) gives the play's `duration` and its `EasingFunction`:
+- **Eased:** the duration as given, and `resolveEasing(easing)`, or `linear` without one.
+- **Springs:** `resolveSpring` gives a `DampedSpring` and the duration, and the easing is `new SpringEasing(spring, duration)`:
 
-A sequence whose `delay` is a stagger plays once per target index. The copy at index *i* plays target *i* of each of its animations, so every animation inside must have the same number of targets, *n*.
-- Each copy's delay is the stagger at (*i*, *n*), and its positions resolve within that copy.
-- A stagger inside the copy, on an animation or a nested sequence, gives it its delay at (*i*, *n*), as it would one target. That pushes on the entry in that copy only.
-- From outside, the staggered sequence's first start is its earliest copy's, and its ends are its latest copy's.
+| Kind | Natural frequency ω₀ | Damping ratio ζ | Duration |
+|---|---|---|---|
+| Physical | √(k / m) | c / (2√(k·m)) | `restTime(restDelta ?? PRECISION)` |
+| Visual | 2π / `visualDuration` | from `bounce` | `restTime(PRECISION)` |
+| Duration | solved, below | from `bounce` | `duration` as given |
 
-### 2.7 Stagger
+- **`bounce` to ζ,** as Apple's springs do: `bounce ≥ 0 ? 1 − bounce : 1 / (1 + bounce)`.
+- **Solving a duration spring** (`springRestingAfter`): rest time shrinks in proportion as ω₀ grows, except that the velocity, in progress per second, changes meaning with ω₀.
+    - It starts from ω₀ = `DampedSpring(1, ζ).restTime(PRECISION) / duration`.
+    - It repeats ω₀ ← `DampedSpring(1, ζ, velocity / ω₀).restTime(PRECISION) / duration`, up to 16 rounds, until the change is at most ω₀ × 10⁻¹².
+- **Spring quantities are in progress units.** `velocity` is progress per second, and `restDelta` is a `Progress`, defaulting to `PRECISION`. This is sound because a spring's motion is linear in its distance: a spring from 0 to 1 is a scaled copy of the same spring between any two values.
+
+### 2.3 Easings
+
+**Descriptors** (`src/easing.ts`):
+
+| Form | Type | Meaning |
+|---|---|---|
+| Preset | `'linear' \| 'ease' \| 'easeIn' \| 'easeOut' \| 'easeInOut'` | CSS's curves, below |
+| Cubic Bézier | `CubicBezierEasingDescriptor = readonly [x1, y1, x2, y2]` | As CSS `cubic-bezier()`. `x1` and `x2` must be within 0–1. |
+| Steps | `StepsEasingDescriptor = readonly [count, position?: StepPosition]` | As CSS `steps()`. `StepPosition` is `'jumpStart' \| 'jumpEnd' \| 'jumpNone' \| 'jumpBoth'`, defaulting to `'jumpEnd'`. `count` is a whole number of at least 1, or 2 for `'jumpNone'`. |
+
+| Preset | Curve |
+|---|---|
+| `ease` | `(0.25, 0.1, 0.25, 1)` |
+| `easeIn` | `(0.42, 0, 1, 1)` |
+| `easeOut` | `(0, 0, 0.58, 1)` |
+| `easeInOut` | `(0.42, 0, 0.58, 1)` |
+
+- **`cubicBezier(x1, y1, x2, y2)`** and **`steps(count, position?)`** return the same tuples, `[count]` or `[count, position]`. Helpers exist here because these descriptors are positional tuples. Transitions have named keys, so they need none.
+- **`resolveEasing`** gives the `EasingFunction`. Presets are shared instances. Invalid descriptors throw a `RangeError` when they're resolved, which is when the timing is made.
+
+**Easing functions.** An `EasingFunction` is pure math over its input time, from 0 to 1, limited to a **window** from `windowStart` to `windowEnd`. It's exported as a type, and reachable as `AnimationTiming.easing`.
+
+| Member | Meaning |
+|---|---|
+| `progressAt(offset)` | The progress at an offset. Offsets are fractions of the window, and the progress isn't rescaled to it: a window from 0.25 to 0.75 of `linear` gives a progress from 0.25 to 0.75. |
+| `startProgress`, `endProgress` | The progress the window starts from and ends at, before or after any jump right at an edge. They only differ from `progressAt(0)` and `progressAt(1)` for steps: CSS steps are right-continuous, so a jump-start easing already outputs 1/n at time 0, but it starts *from* 0. |
+| `turningOffsets()` | The offsets strictly inside the window where the progress turns back, in order. |
+| `offsetsAt(progress)` | The offsets in the window where the progress reaches `progress`, in order, clamped to 0–1. |
+| `windowed(start, end)` | The part of the window between two offsets, running backwards when `end` comes first. |
+| `reversed()` | The window run backwards: `windowEnd` and `windowStart` swapped. |
+| `isWhole` | Whether the window is the whole easing, forwards. |
+
+- **A window runs backwards** when `windowEnd` comes before `windowStart`.
+- **Splitting is always done by cutting windows,** never by building new curves.
+- Offsets found by solving count as inside the window within 10⁻⁹.
+
+| Class | Progress at input *u* | Turns back at | Also |
+|---|---|---|---|
+| `LinearEasing` | *u* | never | `linear` is the shared instance |
+| `CubicBezierEasing` | y at the curve parameter where x = *u* | x at y's turning parameters | `definition`, `curve` (`src/cubic-bezier.ts`) |
+| `StepsEasing` | `clamp(floor(u·count) + startJump, 0, jumps) / jumps` | never | `jumpOffsets()`, the offsets strictly inside the window where it jumps |
+| `SpringEasing` | the spring's position at *u*·`duration`, plus the closing gap | turning times / `duration` | `spring`, `duration`, `turningTimes`, `progressAtTime`, `slopeAtTime` |
+
+- **Steps:** `jumps` is `count` for `jumpStart` and `jumpEnd`, `count − 1` for `jumpNone`, and `count + 1` for `jumpBoth`. `startJump` is 1 for `jumpStart` and `jumpBoth`, and 0 otherwise.
+- **Springs:** a `SpringEasing` is the spring's closed-form motion over its duration. It closes the gap left at the end, 1 − position(`duration`), evenly from its last turning time to its duration, so it ends at exactly 1 without a jump.
+
+### 2.4 Damped springs
+
+`new DampedSpring(naturalFrequency, dampingRatio, initialVelocity = 0)` is a mass on a damped spring that starts at progress 0 and is pulled towards 1, in closed form throughout (`src/damped-spring.ts`).
+
+- **Validation:** ω₀ and ζ must be finite and above 0.
+- **`DampedSpring.physical(stiffness, damping, mass, velocity)`** converts from `m·x″ = −k·x − c·x′`.
+
+| Regime | When | Motion |
+|---|---|---|
+| Underdamped | ζ < 1 | Swings around the target, decaying at ζω₀, with frequency ω₀√(1 − ζ²) |
+| Critically damped | ζ = 1 | The fastest approach that doesn't swing past the target, unless pushed |
+| Overdamped | ζ > 1 | Creeps in as the sum of decays at ω₀(−ζ ± √(ζ² − 1)) |
+
+| Member | Meaning |
+|---|---|
+| `positionAt(t)`, `velocityAt(t)` | Progress and progress per second. |
+| `accelerationAt(t)` | From `x″ = −ω₀²·x − 2ζω₀·x′`. |
+| `turningTimes(until)` | The times after 0 and before `until` where the velocity is 0, in order. |
+| `restTime(restDelta)` | When the spring comes within `restDelta` of its target for good. |
+
+**Rest time.** Between turning times the spring only moves one way, so it enters the rest band once, after the last swing that leaves it.
+1. If it starts within the band, it's 0.
+2. Otherwise, it walks the turning times while the displacement there is outside the band.
+3. With no turning time inside the band, it doubles a reach from π/ω₀ until the spring is inside.
+4. It solves for the band's edge, on the side of the last swing out, with `solveMonotone`.
+
+### 2.5 Timing options
+
+```ts
+type RepeatMode = 'loop' | 'reverse' | 'mirror';
+
+interface RepeatOptions {
+    repeat?: number;            // plays after the first
+    repeatDelay?: Seconds;      // between plays, never after the last
+    repeatMode?: RepeatMode;
+}
+
+interface AnimationTimingOptions extends RepeatOptions {
+    delay?: Seconds | Stagger;  // before the first play; not repeated
+}
+
+type SequenceTimingOptions = AnimationTimingOptions;
+```
+
+| Option | Default | Rule |
+|---|---|---|
+| `delay` | 0 | A finite number, or a stagger. Negative becomes 0. |
+| `repeat` | 0 | A number, and may be `Infinity`. Negative becomes 0, and fractions round down. |
+| `repeatDelay` | 0 | A finite number. Negative becomes 0. |
+| `repeatMode` | `'loop'` | |
+
+| Mode | Every other play |
+|---|---|
+| `loop` | Runs forwards again. |
+| `reverse` | Runs backwards in time, so its easing runs backwards too. |
+| `mirror` | Flips the progress (`1 − progress`) and keeps the easing running forwards. This usually suits springs, because a spring played backwards starts wobbly and ends calm. |
+
+- **For a sequence,** `reverse` reverses the whole iteration in time, and `mirror` does the same but keeps each animation's easing running forwards through flipped values.
+- **`Infinity`** is valid on animations and sequences, including an infinite entry inside an infinitely repeating sequence.
+- **Clamping** is `clampedDelay` and `clampedRepeats` (`src/timing-options.ts`). `NaN` and infinite times throw through `checkNumber` (`src/utils/validation.ts`).
+
+### 2.6 Staggers
 
 ```ts
 type Stagger = (index: number, total: number) => Seconds;
-stagger(each, {from?, easing?})
+
+type StaggerOptions = ({each: Seconds; amount?: never} | {amount: Seconds; each?: never}) & {
+    from?: 'first' | 'last' | 'center' | number;
+    easing?: EasingDescriptor;
+};
+
+function stagger(options: StaggerOptions): Stagger;
 ```
 
-A stagger is an animation's or a sequence's `delay` given as a function of each target's index. It's a timing decision, so it belongs in the definition. Only the mapping says how many targets there are, so timings are resolved at adaptation. `from` is `'first'`, `'last'`, `'center'` or an index. `easing` spreads the delays through an easing. `stagger` throws for an `each`, or an index `from`, that isn't a finite number. Negative staggered delays become 0, and NaN or infinite ones throw.
+A stagger is a `delay` given as a function of each element's index (`src/stagger.ts`). It's a timing decision, so it belongs in the timing. Only playing says how many elements there are, so delays are resolved at adaptation.
 
-## 3. Mappings
+| Term | Value |
+|---|---|
+| origin | `first`: 0. `last`: total − 1. `center`: (total − 1) / 2. A number: itself. |
+| distance | \|index − origin\| |
+| farthest | max(origin, total − 1 − origin) |
 
-A mapping's shape is derived from the definition's type, so the compiler requires every entry (`src/waapi/mapping.ts`).
+| Options | Delay |
+|---|---|
+| `each` | distance × `each` |
+| `each`, `easing` | easing(distance / farthest) × farthest × `each` |
+| `amount` | distance / farthest × `amount` |
+| `amount`, `easing` | easing(distance / farthest) × `amount` |
+
+- With `amount`, the farthest element waits exactly `amount`. With `from: 'center'`, both edges do.
+- With `easing` or `amount`, a farthest distance of 0 gives 0.
+- **Validation:** exactly one of `each` and `amount`, and `each`, `amount` and a number `from` must be finite.
+- **Resolved delays:** negative ones become 0, and NaN or infinite ones throw.
+- **Any `Stagger` function** works where a stagger does.
+
+### 2.7 Animation timing
 
 ```ts
+class AnimationTiming {
+    private constructor(transition: TransitionDescriptor, options?: AnimationTimingOptions);
+    static of(transition: TransitionDescriptor, options?: AnimationTimingOptions): AnimationTiming;
+
+    readonly transition: TransitionDescriptor;
+    readonly options: AnimationTimingOptions;    // clamped
+    readonly duration: Seconds;                  // one play
+    readonly easing: EasingFunction;
+}
+
+type AnimationTimingDescriptor = TransitionDescriptor & AnimationTimingOptions;
+```
+
+- **One play through the transition,** with its delay and repeats (`src/animation.ts`).
+- **`of` is the only way to make one.** The constructor is private, and validates the transition and options, clamps the options, and resolves the transition once, so every adapter shares the same math.
+- **A descriptor** is a transition with the options spread into it. Wherever a timing is taken, it's split by key into the transition and the timing options (`delay`, `repeat`, `repeatDelay`, `repeatMode`) and made into an `AnimationTiming` there. The two key sets never overlap.
+- **Timings have no name.** They get one when they're placed in a sequence, so the same timing can be placed many times.
+- **There's no superclass.** Each timing class validates its own options.
+- **`TimedTweenAnimation`** is pending and internal (`@internal`, stripped from the build): tweens that run one after another, each with its own transition, delay and finite repeats. Sequences can't hold it yet, and nothing plays it.
+
+### 2.8 Sequence timing
+
+```ts
+class SequenceTiming {
+    static builder(): SequenceTimingBuilder;
+}
+
+class SequenceTimingBuilder<Names extends string = never> {
+    add<N extends string>(
+        name: N,
+        timing: AnimationTiming | AnimationTimingDescriptor | SequenceTiming,
+        at?: At<Names>
+    ): SequenceTimingBuilder<Names | N>;
+    build(options?: SequenceTimingOptions): SequenceTiming;
+}
+```
+
+A sequence timing lays named timings out in time, without targets or values (`src/sequence.ts`).
+
+- **Names** are required, because a mapping refers to entries by name (§3.7). They're unique within their sequence, and can only contain letters, digits and underscores. So they can't contain `>`, and entry paths can't collide.
+- **`add`** checks the name, parses the position and checks its references against the names so far, and makes a descriptor into an `AnimationTiming`, so all of these throw at the `add` that wrote them.
+- **Builders are immutable.** `add` returns a new builder with its own copy of the entries, so branches never share entries.
+- **`build`** validates and clamps the options as an animation timing's, and throws for a sequence without entries. The `SequenceTiming` constructor checks its names and positions again, so a sequence timing made without the builder is checked too.
+- **Entries** are kept in order as `names`, with `entries` keyed by name. Each is either a timing or a nested sequence timing, with its parsed position.
+- **Nesting.** A nested sequence is one unit on the outer timeline. Its entries' positions only place them within it.
+
+#### 2.8.1 Positions (`At`)
+
+```
+at        = Seconds | string
+string    = [name] [anchor] [offset]       at least one of anchor and offset
+anchor    = '<' | '>' | '>>'               '>>' takes no name
+offset    = sign ['='] amount ['%']        '=' only together with '%'
+sign      = '+' | '-'
+```
+
+| Anchor | Relative to |
+|---|---|
+| none, or `>` | the referenced entry's last referenceable end |
+| `<` | the referenced entry's first start |
+| `>>` | the latest last referenceable end among all earlier entries |
+
+| Offset | Measured in |
+|---|---|
+| `+n`, `-n` | seconds |
+| `+n%`, `-n%` | shares of the referenced entry's span, or of everything so far for `>>` |
+| `+=n%`, `-=n%` | shares of the inserted entry's span |
+
+| Position | Meaning |
+|---|---|
+| omitted | `'>'` |
+| `1.5` | absolute time from the start of the sequence's iteration |
+| `'>'`, `'+0.2'`, `'>-0.3'` | from the previous entry's end |
+| `'<'`, `'<+0.1'` | from the previous entry's start |
+| `'>>'`, `'>>+0.5'`, `'>>-=25%'` | from the end of everything so far |
+| `'title>'`, `'title+0.2'`, `'title>+0.2'` | from `title`'s end |
+| `'title<'`, `'title<+50%'` | from `title`'s start |
+
+- **The type.** `At<Names>` is a template literal type over the names given so far, so positions can only refer to earlier names.
+- **The parsed form.** `parseAt` gives either an absolute time, or a relative position with:
+    - the reference: a name, the previous entry, or everything so far;
+    - the anchor: the start or the end;
+    - the offset and what it's measured in: seconds, a share of the referenced span, or a share of the inserted span.
+- **These throw** at `add`:
+    - a string that doesn't parse;
+    - `=` without `%` (`'+=1'`);
+    - an offset without a sign (`'<0.2'`);
+    - a name without an anchor or offset (`'title'`);
+    - a name before `>>` (`'title>>'`);
+    - `<<` in any form;
+    - a reference to a name that isn't an earlier entry;
+    - a time or offset that isn't finite.
+
+#### 2.8.2 Reach
+
+Times are local to the iteration of the sequence an entry is in.
+
+| Term | Meaning |
+|---|---|
+| **First start** | The position plus the delay: an animation's shortest staggered delay, or a sequence's delay. A staggered sequence's is its earliest copy's. References to an entry's start resolve to its first start. |
+| **Last referenceable end** | Finite entry: its end, after its delay and all its repeats. Infinite entry: the end of its first iteration, since infinity can't be referred to. Staggered animation: from its latest element. Sequence: from its iterations, each lasting until the latest last referenceable end among its entries. Staggered sequence: from its latest copy. |
+| **Span** | Last referenceable end − first start. `=%` uses the inserted entry's own span, which doesn't depend on its position. |
+| **Previous entry** | The entry added just before. For the first entry, it's the start of the sequence, with a span of 0. |
+| **Everything so far** | Ends at the latest last referenceable end among the earlier entries, and spans from the earliest first start among them. With none, it's the start of the sequence. |
+
+- A position that resolves below 0 becomes 0.
+- References never reach into nested sequences.
+
+#### 2.8.3 Staggered sequences
+
+A sequence whose `delay` is a stagger plays once per element index. The copy at index *i* plays element *i* of each of its animations, so every animation inside must have the same number of elements, *n*, or playing throws.
+
+- Each copy's delay is the stagger at (*i*, *n*), and its positions resolve within that copy.
+- A stagger inside the copy, on an animation or a nested sequence, gives it its delay at (*i*, *n*), as it would one element. That pushes on the entry in that copy only.
+- From outside, the staggered sequence's first start is its earliest copy's, and its ends are its latest copy's.
+
+#### 2.8.4 Repeats in sequences
+
+- **Repeats compound.** An entry that repeats inside a repeating sequence plays all of its repeats in every iteration of the sequence.
+- **An infinite entry inside a sequence** plays only its first iteration in each iteration of the sequence, and carries on repeating once the sequence is done (§5.4).
+
+## 3. Definitions and Controls
+
+### 3.1 Overview
+
+| | Value-free | Bound | Running |
+|---|---|---|---|
+| One animation | `AnimationTiming` | `AnimationDefinition` | `AnimationControls` |
+| A sequence | `SequenceTiming` | `SequenceDefinition` | `AnimationControls` |
+
+- **A definition** is a timing bound to targets, values, `composite` and `fill`. It's everything needed to play, with no playback state. `Definition` is `AnimationDefinition | SequenceDefinition`.
+- **`play()`** turns a definition into running animations and returns their controls. A definition can be played any number of times, in any scope.
+- **Definitions are DOM-bound:** targets are elements, and values are CSS. There's no engine parameter yet. Everything plays with WAAPI.
+- **Definitions are immutable,** and so are their builders.
+- `AnimationDefinition`, `SequenceDefinition` and the builders are exported as types only. The functions make them.
+
+### 3.2 `animation()`
+
+```ts
+function animation<Values extends AnimationValues>(
+    target: Target,
+    values: Values,
+    timing: AnimationTiming | AnimationTimingDescriptor | PropertyTimings<Values>,
+    options?: AnimationDefinitionOptions
+): AnimationDefinition;
+```
+
+| When | What happens |
+|---|---|
+| `animation()` | The timing is made and validated, the values' forms are checked (§3.4), and the options are kept. All of these throw here. |
+| `play()` | The target is resolved in the scope, the values are read against each element, and the animations are created (§3.9). |
+
+**Telling the timing forms apart,** in order:
+1. An `AnimationTiming` instance.
+2. A descriptor: it has a transition key (`duration`, `visualDuration`, `stiffness` or `damping`) whose value is a number.
+3. Otherwise, a `PropertyTimings` record. Its values are timings, which are objects, so a property that happens to share a transition key's name isn't mistaken for one.
+
+### 3.3 Targets
+
+```ts
+type CSSSelector = string;
 type Target = Element | Element[] | CSSSelector | ((scope: Element) => Element | Element[]);
-type ValueStops = readonly (number | string)[] | { [progress: number]: number | string };
-type AnimationMapping = {
-    target: Target;
-    values: { [property: string]: ValueStops };
-    composite?: CompositeOperation;
-    fill?: Exclude<FillMode, 'auto'>;
+```
+
+- **Resolution** (`resolveTargets`, at `play`): a selector is `scope.querySelectorAll`, and a function is called with the scope and its result flattened.
+- **Elements are deduplicated** in order. An element's index in that order is what staggers use: document order for a selector.
+- **No elements throws:** `"<selector>" matches no elements.`, or `The target has no elements.`
+
+### 3.4 Values
+
+```ts
+type CSSValue = number | string;
+type ValueStops = CSSValue | readonly (CSSValue | null)[] | { [progress: number]: CSSValue | null };
+type AnimationValues = { [property: string]: ValueStops };
+```
+
+**Forms to stops.**
+
+| Form | Stops |
+|---|---|
+| `v` | `{1: v}` |
+| `[v]` | `{1: v}`: a single keyframe is the last, as in WAAPI |
+| `[v₀, …, vₙ]`, n ≥ 1 | vᵢ at i / n |
+| `{p: v, …}` | as keyed |
+| `null` at 0 or 1 | that stop is missing |
+
+- Keys outside 0–1 throw. `null` anywhere but the ends throws, and so does a list or object without values.
+- **A missing 0** is the value underneath as the entry starts: the value its track shows then (§5.6), or the property's current value when `play` is called.
+- **A missing 1** is the value underneath as the entry ends. §5.6 only resolves missing starts so far.
+- **For an entry that adds** (`composite: 'add'` or `'accumulate'`), a missing end is the neutral value, so it adds nothing there. That's what WAAPI synthesizes for a missing end keyframe of an additive effect. Where values pass through, missing ends stay missing keyframes for WAAPI to fill. Where the adapter writes keyframes between stops, it fills them the same way.
+- **Between stops,** the value is linear in the progress. Past the ends, as a spring overshoots, it continues the nearest segment.
+- **Properties** are camelCase. Custom properties are written as they are (`--like-this`). `float` and `offset` become `cssFloat` and `cssOffset` in keyframes (§5.8).
+- **Value types and units** come from `CSS.supports`, per property (§5.2).
+- **Passing through or resolving to numbers:** values pass through to WAAPI as their CSS text wherever every keyframe lands on a stop, and are resolved to numbers in one unit otherwise (§5.6). Where they need numbers, a property must take a single number: `transform` and two-value `translate` aren't supported there.
+
+### 3.5 Timing per property
+
+```ts
+type PropertyTimings<Values extends AnimationValues> = {
+    [Property in keyof Values]: AnimationTiming | AnimationTimingDescriptor;
 };
 ```
 
-A sequence's mapping mirrors its tree. It's keyed by entry name, with a nested mapping for each nested sequence. `MappingOf<Definition>` gives the mapping type of an animation or a sequence.
+- **Every property** in `values` needs a timing, and no other key is allowed. The type requires it, and the runtime throws for a missing or extra key.
+- **Under the hood,** it's a nested sequence with one entry per property, all starting together (`'<'`), on the same target, with the definition's options.
+- **Animation `id`s** leave out the level this split adds, so they read as the definition's own path and the property.
+- It works for inline sequence entries too.
 
-- **Values are stops** keyed by progress, or a list spread evenly from 0 to 1. Stops outside 0–1 are rejected. A missing 1 takes the last given value. A missing 0 takes the value the track has as the entry starts (§5.6), except for an entry that adds to what's under it, where it takes the first given value. Between stops, the value is linear in the progress. Past the ends, as a spring overshoots, it continues the nearest segment.
-- **CSS properties** are given in camelCase. Custom properties are given by their own name, `--like-this`.
-- **A value** is a number, a number with a unit (`'24px'`), or a CSS expression (`'calc(50% + 2em)'`).
-- **`composite`** is WAAPI's: `'replace'` by default, `'add'` or `'accumulate'`.
-- **`fill`** is WAAPI's, for the entry as a whole: it overrides the fills the tracks give the entry at its ends (§5.5). Without it, the entry keeps the fills the tracks give it.
+### 3.6 Definition options
 
-`sequence(options?)` builds a sequence and its mapping together, as a `MappedSequenceBuilder<Names>`. `add` has four overloads: `(target, values, animation, at?)` and `(sequence, at?)`, each also with a name first. The implementation takes rest arguments typed as a union of the four argument lists. A named entry is told apart by its second argument being a sequence, or its fourth being an object, where an unnamed one has its position.
-- Given names join `Names`, and `at` is an `At<Names>`, so positions can only refer to names given before them. `add` parses each position and checks it against the names given so far, and checks given names as `Sequence.builder().add` does.
-- The animation can be a `MappedTransitionAndOptions`, a transition with its animation's options and its mapping's `composite` and `fill`, or a `MappedAnimation`, `{animation, composite?, fill?}`.
-- Entries are kept as they're added. Only `animate()` names the unnamed ones, in order, as `a` to `z`, then `aa`, `ab` and on, skipping the names given, so no position can refer to them. It then builds the sequence and its mapping and plays them.
+```ts
+interface AnimationDefinitionOptions {
+    composite?: CompositeOperation;            // 'replace' by default
+    fill?: Exclude<FillMode, 'auto'>;
+}
+```
+
+- **`composite`** is WAAPI's, given to every effect of the entry.
+- **`fill`** is WAAPI's, for the entry as a whole. It overrides the fills the tracks give the entry at its ends (§5.5). Without it, the entry keeps the fills the tracks give it.
+
+### 3.7 `sequence()`
+
+```ts
+function sequence(): SequenceDefinitionBuilder;
+function sequence<Timing extends SequenceTiming>(timing: Timing, mapping: SequenceMapping<Timing>): SequenceDefinition;
+```
+
+**The builder.**
+
+```ts
+interface EntryPlacementOptions<N extends string, Names extends string> {
+    name?: N;
+    at?: At<Names>;
+}
+
+class SequenceDefinitionBuilder<Names extends string = never> {
+    add<Values extends AnimationValues, N extends string = never>(
+        target: Target,
+        values: Values,
+        timing: AnimationTiming | AnimationTimingDescriptor | PropertyTimings<Values>,
+        options?: AnimationDefinitionOptions & EntryPlacementOptions<N, Names>
+    ): SequenceDefinitionBuilder<Names | N>;
+
+    add<N extends string = never>(
+        definition: AnimationDefinition | SequenceDefinition,
+        placement?: EntryPlacementOptions<N, Names>
+    ): SequenceDefinitionBuilder<Names | N>;
+
+    build(options?: SequenceTimingOptions): SequenceDefinition;
+}
+```
+
+- **Forms.** A first argument that's an `AnimationDefinition` or a `SequenceDefinition` is a definition entry. Otherwise it's inline. A target is never a definition, so `instanceof` decides, and argument shapes are never guessed.
+- **The inline form** is `add(animation(target, values, timing, options), placement)` flattened: the options are the definition's `composite` and `fill` and the entry's `name` and `at`.
+- **At `add`:** a given name is checked as in §2.8, the position is parsed and checked against the names given so far, and an inline timing is made. All of these throw there.
+- **Names are optional.** Given names join `Names`, which types `at`. Entries without a name can't be referred to.
+- **Immutable:** each `add` returns a new builder with its own copy of the entries.
+- **`build`**:
+    1. names the unnamed entries in order, as `a` to `z`, then `aa`, `ab` and on, skipping the names given;
+    2. compiles the entries into a `SequenceTiming` and a `SequenceMapping`, with each nested definition contributing its own timing and mapping;
+    3. validates and clamps the options;
+    4. throws for a sequence without entries.
+
+**From a sequence timing.**
+
+```ts
+interface AnimationMapping extends AnimationDefinitionOptions {
+    target: Target;
+    values: AnimationValues;
+}
+
+type SequenceMapping<Timing extends SequenceTiming> = {
+    [Name in entry names of Timing]: entry is a SequenceTiming
+        ? SequenceMapping<that SequenceTiming>
+        : AnimationMapping;
+};
+```
+
+- The mapping mirrors the timing's tree, keyed by entry name, with a nested mapping for each nested sequence timing.
+- Every entry must be mapped. The type requires it, and the runtime throws `No mapping present for "<path>".`
+- It returns a `SequenceDefinition`, the same as `build()`, so it can be played or added to another sequence.
+
+### 3.8 Overlaps
+
+When entries animate the same property of the same element (§5.5):
+
+- The one declared later shows over the earlier one while it runs.
+- An earlier entry that falls entirely within a later one is dropped, unless the later one adds to it.
+- Only the entry that starts first holds its start values before it starts.
+- An entry holds its end values after it ends, unless one declared before it is still running.
+- An entry's `fill` overrides both.
+
+### 3.9 Playing
+
+```ts
+interface PlayOptions {
+    scope?: Element;          // document.documentElement by default
+}
+
+definition.play(options?: PlayOptions): AnimationControls;
+```
+
+- **Each `play`** resolves the targets in the scope, the values per element, the timings with the element counts, and the tracks, then calls `element.animate()` for each effect (§5).
+- **It always starts playing.** There's no `autoplay`: pausing right after `play` shows no motion, because no frame renders in between.
+- **Animation `id`s** are the entry path and the property, `path:property`, or the property alone for an animation on its own. The path is the entry names leading to the leaf, joined by `>`.
+
+### 3.10 Controls
+
+`AnimationControls` (`src/waapi/controls.ts`) wraps the native `Animation`s of one play.
+
+| Member | Behaviour |
+|---|---|
+| `play()`, `pause()`, `cancel()` | Called on every animation. |
+| `finish()` | Called on every animation. It throws while one repeats forever, as WAAPI's does. |
+| `seek(time)` | Sets every animation's `currentTime` to `time` × 1000. `time` is seconds from the start of the definition. |
+| `playbackRate` | Gets the first animation's, or 1 with none. Sets every animation's. |
+| `startTime` | Seconds on the timeline. Gets the first animation's, or `null` when it's unresolved or there are none. Sets every animation's. |
+| `finished` | `Promise.all` of every animation's `finished`, resolving to `undefined`. A new promise on each access. It never settles while an animation repeats forever. |
+| `onFinish(listener)`, `onCancel(listener)` | Calls the listener each time every animation has dispatched that event since the last call. Returns a function that removes the listener from every animation. |
+| `animations` | The native `Animation`s, in creation order. |
+| `retarget` | `@internal`. Declared, with a stub body. |
+
+- **Animations hold their end values** after they end. Cancelling the controls lets go of them.
+- **`retarget` (planned):**
+    1. keep the effects as they are before they become native;
+    2. read the current time and find the active span's stops and easing;
+    3. take the velocity by the chain rule: dValue/dProgress × dProgress/dOffset × dOffset/dt;
+    4. start the new motion from the current value and velocity, evaluating CSS values where needed and throwing only when they can't share a unit.
+
+  Interruptions are built on it.
+
+### 3.11 Exports
+
+| Kind | Exports |
+|---|---|
+| Functions | `animation`, `sequence`, `stagger`, `cubicBezier`, `steps` |
+| Classes | `AnimationTiming`, `SequenceTiming` |
+| Definitions and controls (types) | `AnimationDefinition`, `SequenceDefinition`, `Definition`, `SequenceDefinitionBuilder`, `SequenceTimingBuilder`, `AnimationControls`, `PlayOptions` |
+| Targets and values | `Target`, `CSSSelector`, `CSSValue`, `ValueStops`, `AnimationValues`, `PropertyTimings` |
+| Options and mappings | `AnimationDefinitionOptions`, `EntryPlacementOptions`, `AnimationMapping`, `SequenceMapping` |
+| Timing | `AnimationTimingDescriptor`, `AnimationTimingOptions`, `SequenceTimingOptions`, `RepeatOptions`, `RepeatMode`, `Stagger`, `StaggerOptions`, `At` |
+| Transitions | `TransitionDescriptor`, `EasedTransitionDescriptor`, `SpringTransitionDescriptor`, `DurationSpringTransitionDescriptor`, `VisualSpringTransitionDescriptor`, `PhysicalSpringTransitionDescriptor` |
+| Easings | `EasingDescriptor`, `CubicBezierEasingDescriptor`, `StepsEasingDescriptor`, `StepPosition`, `EasingFunction` |
+| Units | `Seconds`, `Progress` |
 
 ## 4. Code layout
 
@@ -239,7 +678,7 @@ Each stop holds a `StopValue`: its text, or none for a missing 0, and later its 
 |---|---|
 | `firstStart` | Position plus delay (an animation's shortest staggered delay, or a sequence's delay); a staggered sequence's earliest copy's |
 | `end` | Undefined when it never ends |
-| `lastReferenceableEnd` | See §2.6 |
+| `lastReferenceableEnd` | See §2.8.2 |
 | `playDuration` | One play of an animation, or one iteration of a sequence |
 | `totalDuration` | Plays and repeat delays without the delay; infinite when it never ends |
 

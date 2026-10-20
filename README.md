@@ -21,315 +21,130 @@ yarn add timesfps
 pnpm add timesfps
 ```
 
-The library is written in TypeScript, ships as an ES module, and includes type definitions.
+The library is written in TypeScript, ships as an ES module, and includes type definitions. Everything is exported from the root `timesfps` entry point, along with the types of every option.
 
 <br/><br/>
 
-## Quick Start
+## Two Entry Points
+
+You build everything with two functions:
+
+- **`animation(target, values, timing, options?)`** defines one animation: which elements, which values, and how it moves through them.
+- **`sequence()`** lays animations out in time, and nests other sequences.
+
+Both give you a **definition**. A definition doesn't play until you call `play()`, and you can play it as many times as you like.
 
 ```ts
-import {animate, animation, eased} from "timesfps";
+import {animation, sequence, stagger} from "timesfps";
 
-const fadeIn = animation(eased(0.4, 'easeOut'));
+// A fade with a CSS easing.
+animation('.card', {opacity: [0, 1], scale: [0.95, 1]}, {duration: 0.4, easing: 'easeOut'}).play();
 
-const controls = animate(fadeIn, {
-    target: '.card',
-    values: {
-        opacity: {0: 0, 1: 1},
-        scale: {0: 0.95, 1: 1}
-    }
-});
-```
+// A springy pulse that ripples out from the middle dot, forever.
+animation('.dot', {scale: [1, 1.4]}, {
+    visualDuration: 0.3, bounce: 0.4,
+    delay: stagger({each: 0.05, from: 'center'}),
+    repeat: Infinity, repeatMode: 'mirror', repeatDelay: 0.6
+}).play();
 
-`animate` returns controls that play, pause, seek, cancel and finish everything it started together, and the native `Animation` objects themselves as `animations`.
-
-<br/><br/>
-
-## Transitions
-
-A transition is how one play of an animation moves from start to end.
-
-### Eased
-
-```ts
-import {eased} from "timesfps";
-
-eased(0.4);                              // linear, 0.4 seconds
-eased(0.4, 'easeInOut');                 // 'linear' | 'ease' | 'easeIn' | 'easeOut' | 'easeInOut'
-eased(0.6, [0.3, 1.6, 0.6, 1]);          // a cubic Bézier, as in CSS cubic-bezier()
-eased(1, [4, 'jumpStart']);              // steps: 'jumpStart' | 'jumpEnd' | 'jumpNone' | 'jumpBoth'
-eased(0);                                // jumps straight to the end values
-```
-
-`cubicBezier(x1, y1, x2, y2)` and `steps(count, position?)` write the same easings by name:
-
-```ts
-import {cubicBezier, eased, steps} from "timesfps";
-
-eased(0.6, cubicBezier(0.3, 1.6, 0.6, 1));
-eased(1, steps(4, 'jumpStart'));
-```
-
-### Springs
-
-Springs come in three flavours. Each works out how long it runs.
-
-```ts
-import {spring} from "timesfps";
-
-// Duration: comes to rest exactly at `duration`; `bounce` 0 means no overshoot.
-spring({duration: 0.6, bounce: 0.3});
-
-// Visual: `visualDuration` sets how fast it swings; it runs on until it's at rest.
-spring({visualDuration: 0.4, bounce: 0.2});
-
-// Physical: stiffness, damping and mass, as in m·x″ = −k·x − c·x′.
-spring({stiffness: 260, damping: 22, mass: 1});
-```
-
-All three take an optional `velocity`, in progress per second. Physical springs also take `restDelta`, how close to the target counts as at rest.
-
-`bounce` is between -1 and 1: 0 doesn't overshoot, towards 1 it bounces more, and below 0 it creeps in more slowly. Durations, stiffness, damping and mass must be positive, and `restDelta` between 0 and 1.
-
-Springs are played as fitted cubic Bézier keyframes, within 0.1% of the true motion.
-
-#### `visualDuration` here, in SwiftUI and in Motion
-
-`visualDuration` is one swing of the spring, before damping: its natural frequency is 2π / `visualDuration`. `bounce` maps to the damping ratio as SwiftUI's does: 1 − `bounce` from 0 up, and 1 / (1 + `bounce`) below 0.
-
-- **SwiftUI.** `Spring(duration:bounce:)` is the same spring. SwiftUI calls this `duration` the perceptual duration.
-- **Motion.** The same `visualDuration` and `bounce` make a different spring in Motion:
-    - Motion divides the frequency by 1.2, so its spring swings 1.2 times slower. Pass 1.2 × Motion's `visualDuration` to match it.
-    - Motion keeps the damping ratio at 0.05 or more, so `bounce` stops having an effect at ±0.95.
-    - Below 0, Motion speeds the spring up so that it arrives when a critically damped one would, and the bounce only changes its shape. Here, a negative bounce makes it arrive later.
-    - Motion defaults `bounce` to 0.3; here it's required.
-    - Motion ignores `velocity` on springs given by a duration; here every spring takes it.
-- **Rest.** A spring here is at rest once it stays within 0.001 of its target, measured in progress, or within `restDelta` for a physical spring. It runs exactly that long, and closes the last of the gap evenly, so it never jumps. Motion samples the spring every 50 ms, stops at the first sample where both its speed and its distance from the target are below its thresholds, and jumps to the target there.
-
-<br/><br/>
-
-## Animations
-
-```ts
-import {AnimationDefinition, eased, stagger} from "timesfps";
-
-const pulse = AnimationDefinition.of(eased(0.5, 'easeInOut'), {
-    delay: 0.2,             // seconds, or a stagger
-    repeatCount: 3,         // repetitions after the first play; Infinity repeats forever
-    repeatDelay: 0.25,      // seconds between plays
-    repeatMode: 'mirror'    // 'loop' | 'reverse' | 'mirror'
-});
-```
-
-- **`loop`** starts every play from the beginning.
-- **`reverse`** plays every other play backwards in time, easing included.
-- **`mirror`** swaps the start and end values on every other play, but keeps the easing running forwards.
-
-Invalid numbers (`NaN`, or infinite times) and negative durations throw. Negative delays and repeats become 0, and fractional repeat counts round down.
-
-`animation(transition, options?)` is the same as `AnimationDefinition.of(transition, options?)`. Wherever an animation is taken, a transition with the options spread into it works too: `{...eased(0.3), delay: 0.1}`.
-
-### Staggers
-
-A stagger gives each target its own delay:
-
-```ts
-AnimationDefinition.of(eased(0.3), {
-    delay: stagger(0.05)                                   // 0, 0.05, 0.1, …
-});
-AnimationDefinition.of(eased(0.3), {
-    delay: stagger(0.05, {from: 'center', easing: 'easeOut'})
-});
-```
-
-`from` is `'first'`, `'last'`, `'center'` or an index. `easing` spreads the delays along an easing.
-
-<br/><br/>
-
-## Sequences
-
-A sequence lays named entries out in time. Entries are animations or other sequences.
-
-```ts
-import {AnimationDefinition, eased, spring, Sequence} from "timesfps";
-
-const intro = Sequence.builder()
-    .add('title', AnimationDefinition.of(spring({duration: 0.6, bounce: 0.2})))
-    .add('subtitle', AnimationDefinition.of(eased(0.4, 'easeOut')), '-0.3')
-    .add('button', AnimationDefinition.of(eased(0.3)), 'title<+0.2')
-    .build({delay: 0.1});
-```
-
-An entry's position, its third argument, can be:
-
-| Position     | Means                                                          |
-|--------------|----------------------------------------------------------------|
-| omitted      | right after the previous entry, the same as `'+0'`             |
-| `1.5`        | 1.5 seconds from the start of the sequence                     |
-| `'+0.2'`     | 0.2 seconds after the previous entry ends                      |
-| `'-0.3'`     | 0.3 seconds before the previous entry ends                     |
-| `'<+0.1'`    | 0.1 seconds after the previous entry starts (`'<-0.1'`: before) |
-| `'<'`        | when the previous entry starts, the same as `'<+0'`            |
-| `'title+0'`  | when the entry named `title` ends                              |
-| `'title<+0'` | when the entry named `title` starts                            |
-| `'title<'`   | the same as `'title<+0'`                                       |
-
-An entry that repeats forever counts as ending after its first play. Names may only contain letters, digits and underscores. A sequence needs at least one entry, and a position that can't be parsed, or that refers to an entry that isn't an earlier one, throws as the entry is added.
-
-Builders are mutable: `add` changes the builder and returns it. Two branches added to one builder both end up in it, so start each branch from its own builder.
-
-### Nesting and repeating
-
-Sequences nest, and take the same repeat options as animations:
-
-```ts
-const card = Sequence.builder()
-    .add('lift', AnimationDefinition.of(eased(0.3, 'easeOut')))
-    .add('glow', AnimationDefinition.of(eased(0.5)), '<')
-    .build({repeatCount: 2, repeatDelay: 0.5, repeatMode: 'reverse'});
-
-const page = Sequence.builder()
-    .add('intro', intro)
-    .add('card', card, '-0.2')
-    .build();
-```
-
-Repeats compound: an animation that repeats inside a sequence that repeats plays all of its own repetitions in every iteration of the sequence. The exception is an animation that repeats forever. It plays only its first iteration in each iteration of the sequence, and carries on repeating once the sequence is done.
-
-### Staggered sequences
-
-A sequence's `delay` can be a stagger too. The sequence then plays once for each target index: the copy at index 2 plays the third target of each of its animations, and its positions chain within that copy alone.
-
-```ts
-const cards = Sequence.builder()
-    .add('lift', AnimationDefinition.of(eased(0.3)))
-    .add('glow', AnimationDefinition.of(eased(0.5)))
-    .build({delay: stagger(0.1)});
-
-animate(cards, {
-    lift: {target: '.card', values: {scale: [1, 1.05]}},
-    glow: {target: '.card .icon', values: {opacity: [0, 1]}}
-});
-```
-
-Each card's icon glows once that card has lifted. Every animation inside a staggered sequence needs as many targets as the others. A stagger inside it gives its index its own delay, which pushes that entry on in that copy.
-
-### Sequences played once
-
-`sequence()` builds a sequence together with its targets and values, and plays it with `animate()`:
-
-```ts
-import {eased, sequence, spring} from "timesfps";
-
+// A choreographed intro that plays twice: forwards, then backwards.
 sequence()
-    .add('title', 'h1', {opacity: [0, 1]}, {...spring({duration: 0.6, bounce: 0.2}), delay: 0.1})
-    .add('h2', {opacity: [0, 1]}, eased(0.4, 'easeOut'), '-0.3')
-    .add(sequence({repeatCount: 1}).add('#cta', {scale: [0.8, 1]}, eased(0.3)), 'title<+0.2')
-    .animate();
+    .add('h1', {opacity: [0, 1], translate: [-40, 0]}, {duration: 0.6, bounce: 0.2}, {name: 'title'})
+    .add('h2', {opacity: [0, 1]}, {duration: 0.4, easing: 'easeOut'}, {at: '-0.3'})
+    .add('#cta', {scale: [0.8, 1]}, {stiffness: 300, damping: 20}, {at: 'title<+50%'})
+    .build({repeat: 1, repeatMode: 'reverse'})
+    .play();
+
+// One definition, played in two places: each card lifts, and its icon fades in a quarter of the way through.
+const cards = sequence()
+    .add('.card', {translate: [40, 0]}, {duration: 0.6, bounce: 0.2}, {name: 'lift'})
+    .add('.card .icon', {opacity: [0, 1]}, {duration: 0.3}, {at: 'lift<+25%'})
+    .build({delay: stagger({each: 0.1})});
+
+cards.play({scope: featuredList});
+cards.play({scope: archiveList});
 ```
-
-`add(target, values, animation, position?)` adds an animation, and `add(sequence, position?)` a nested one. Either can take a name first, `add(name, …)`, for positions to refer to. Positions can only refer to names given before them, which the types check too; entries without a name can't be referred to. `sequence(options?)` takes the options `build` would.
-
-The animation can carry the mapping's `composite` and `fill`, either spread into a transition with its options, `{...eased(0.3), delay: 0.1, composite: 'add'}`, or next to an animation, `{animation: fadeIn, fill: 'none'}`.
 
 <br/><br/>
 
-## Playing with WAAPI
+## `animation`
 
 ```ts
-import {animate} from "timesfps";
-
-const controls = animate(definition, mapping, {scope, autoplay});
+animation(target, values, timing, options?)
 ```
 
-- `scope` is where selectors and target functions look for elements. It defaults to `document.documentElement`.
-- `autoplay` is whether the animations start playing right away, which they do by default.
+| Argument | What it is |
+|---|---|
+| `target` | The elements to animate. |
+| `values` | The CSS values each property moves through. |
+| `timing` | How long it takes, how it moves, when it starts and how it repeats. |
+| `options` | How its values combine with what's under them, and what it holds outside its active time. |
 
-Each native animation's `id` is its entry's path and its property, such as `intro>title:opacity`, or just the property for an animation on its own.
-
-### Controls
-
-`animate` returns an `AnimationControls`:
-
-- `play()`, `pause()`, `cancel()` and `finish()`, which throws while an animation repeats forever, as WAAPI's does;
-- `seek(time)`, in seconds from the start of the definition;
-- `playbackRate`;
-- `startTime`, in seconds on the timeline, or `null` until it's resolved;
-- `finished`, which settles once every animation has finished, and never while one repeats forever;
-- `onFinish(listener)` and `onCancel(listener)`, which call the listener each time every animation has finished or been canceled, and return a function that removes it;
-- `animations`, the native `Animation` objects.
-
-Animations hold their end values after they end. To let go of them, cancel the controls once they've finished.
-
-### Mappings
-
-For an animation, the mapping says which elements to animate and which values to animate them through:
-
-```ts
-animate(pulse, {
-    target: '.dot',
-    values: {
-        opacity: {0: 0.4, 0.5: 1, 1: 0.4},
-        width: {0: 10, 1: '2em'}
-    }
-});
-```
-
-`composite` sets how the values combine with what's under them: `'replace'`, the default, `'add'` or `'accumulate'`, as in WAAPI.
-
-`fill` is whether the entry holds its start values before it starts and its end values after it ends, as in WAAPI: `'none'`, `'backwards'`, `'forwards'` or `'both'`. It overrides what the entry would otherwise hold (see Overlaps), which is what it holds without one. With `'none'`, the entry stops showing once it ends, and whatever is under it shows again. With `'backwards'`, it holds its start values even while an earlier entry runs.
-
-`MappingOf<typeof definition>` is the type of a definition's mapping, for writing one apart from the `animate` call.
-
-For a sequence, the mapping mirrors its entries by name, nested sequences included:
-
-```ts
-animate(page, {
-    intro: {
-        title: {target: 'h1', values: {opacity: {0: 0, 1: 1}, translate: {0: '-40px', 1: '0px'}}},
-        subtitle: {target: 'h2', values: {opacity: {0: 0, 1: 1}}},
-        button: {target: '#cta', values: {scale: {0: 0.8, 1: 1}}}
-    },
-    card: {
-        lift: {target: '.card', values: {scale: {0: 1, 1: 1.05}}},
-        glow: {target: '.card', values: {'--glow': {0: '0px', 1: '24px'}}}
-    }
-});
-```
+It returns an `AnimationDefinition`. Nothing is looked up or read until you call `play()`.
 
 ### Targets
 
-A target can be:
+| Target | Example |
+|---|---|
+| One element | `animation(heading, …)` |
+| Several elements | `animation([first, second], …)` |
+| A CSS selector, looked up in the scope | `animation('.card', …)` |
+| A function that finds elements in the scope | `animation(scope => scope.querySelectorAll('li'), …)` |
 
-- an `Element`, or an array of them;
-- a CSS selector, looked up in the scope;
-- a function `(scope) => Element | Element[]`.
-
-A target that matches nothing throws.
+- The **scope** is the element you pass to `play({scope})`. It defaults to `document.documentElement`.
+- A function can return one element or an array of them.
+- Each element is animated once, even if the target lists it twice.
+- A target that matches no elements throws when you play.
 
 ### Values
 
-Values are keyed by progress, from 0 to 1. Progress is how far a play has gone through its change, not through its time. A list of values, such as `[0, 1]` or `[10, 40, 20]`, spreads them evenly from 0 to 1. Between keys, values change linearly with progress, and a spring that overshoots carries them past the end values.
+Values are keyed by property. Each property takes its values in one of three forms:
 
-A missing 1 takes the last given value. A missing 0 takes the value the property has as the entry starts: the value an earlier entry leaves it at, or, with none, the property's current value when `animate` is called. An entry that adds to what's under it takes its first given value instead.
+```ts
+animation('.card', {
+    opacity: 1,                          // one value: animates to it
+    scale: [0.9, 1.05, 1],               // a list: spread evenly from start to end
+    translate: {0: -40, 0.7: 8, 1: 0}    // keyed by progress, from 0 to 1
+}, timing);
+```
 
-A number takes the property's default unit: none for properties that take numbers (`opacity`, `scale`), `px` for lengths (`width`, `translate`), `deg` for angles (`rotate`). Any other value is CSS text the property takes.
+**What a key means.** Values are keyed by **progress**, which is how far the animation has gone through its change, not through its time. The timing's easing decides how progress moves over time, and between keys the value changes linearly with progress. A spring that overshoots carries the value past its end, continuing the last stretch.
 
-**Values pass through to WAAPI as they are** when every keyframe lands on a value you gave. That's when the easing is a cubic Bézier, steps or linear, and either:
-- it's a single play, which keeps its easing on the effect; or
-- each play and each hold between them eases from one value to the next in one go, without values between 0 and 1.
+**Missing ends.**
 
-Then any value works, including colours, filters and transforms, and the browser interpolates them itself.
+| You write | It means |
+|---|---|
+| `1` or `[1]` | from the value underneath, to 1 |
+| `{0.5: 1}` | from the value underneath, through 1, back to the value underneath |
+| `{0: 0}` or `[0, null]` | from 0, to the value underneath |
+| `[null, 1]` | from the value underneath, to 1, the same as `1` |
 
-**Otherwise values are resolved to numbers**, because keyframes fall between them: springs, and values between 0 and 1 in repeats that are played as keyframes, which are repeats with a repeat delay, in `mirror` mode, or inside a repeating sequence. An entry that starts while the one under it is between two values needs numbers too. Then every value must resolve to a single number:
-- **a number with a unit**, such as `'2em'`, `'50%'` or `'0.5turn'`;
-- **a CSS expression that resolves to one number**, such as `'calc(100% - 2rem)'` or `'var(--size)'`.
+- **The value underneath** is what the property would show at that moment without this animation: the value an earlier animation leaves it at, or, with none, the property's current value when you call `play()`.
+- `null` stands for the value underneath. It's only allowed at the start or the end.
+- An animation that adds to what's under it (`composite: 'add'` or `'accumulate'`) adds nothing at a missing end.
+- Keys outside 0–1 throw.
 
-Values in different units are resolved against each target, so `{0: 10, 1: '2em'}` ends up in pixels for every element. If they still disagree after resolving, as with `px` and `%`, `animate` throws. An entry that starts from an earlier entry's value, or from the current value, shares its unit, so its values must resolve to that unit, and the current value must then be a single number with a unit.
+**Numbers and units.**
 
-Properties are written in camelCase (`backgroundPositionX`). Custom properties are written as they are (`'--glow'`), and should be given their units explicitly.
+- A number takes the property's default unit: none for properties that take numbers (`opacity`, `scale`), `px` for lengths (`width`, `translate`), `deg` for angles (`rotate`).
+- Any other value is CSS text the property takes: `'2em'`, `'50%'`, `'calc(100% - 2rem)'`, `'var(--size)'`, `'red'`.
+- Properties are written in camelCase (`backgroundPositionX`). Custom properties are written as they are (`'--glow'`), and should be given their units explicitly.
 
-Where values need numbers, each property must take a single number. For compound values, animate a custom property registered with `@property` and use it in your CSS:
+**Any value the property takes works,** including colours, filters and transforms, except in these cases:
+
+- the timing is a spring;
+- the values have keys between 0 and 1, and the animation repeats with a `repeatDelay`, in `mirror` mode, or inside a repeating sequence;
+- a value is missing at 0, and the animation starts while the value underneath is still changing.
+
+In these cases, every value must be a single number, with or without a unit (`'2em'`, `'50%'`, `'0.5turn'`), or a CSS expression that comes to one (`'calc(100% - 2rem)'`, `'var(--size)'`). Also in these cases:
+
+| Rule | Example |
+|---|---|
+| Values in different units must convert to one unit on each element | `{0: 10, 1: '2em'}` works; `{0: '10px', 1: '50%'}` throws |
+| A missing end takes the unit of the value underneath, so that value must be a single number with a unit, and your values must convert to it | `{1: '2em'}` from a current `width` of `120px` works |
+| Properties that take several values at once throw | `transform`, a two-value `translate` |
+
+For compound values in these cases, animate a custom property registered with `@property` and use it in your CSS:
 
 ```css
 @property --y {
@@ -344,35 +159,450 @@ Where values need numbers, each property must take a single number. For compound
 ```
 
 ```ts
-animate(fadeUp, {target: '.card', values: {'--y': {0: '20px', 1: '0px'}}});
+animation('.card', {'--y': {0: '20px', 1: '0px'}}, {duration: 0.6, bounce: 0.2});
 ```
+
+### Timing
+
+The third argument is the timing: a **transition**, which shapes one play, with the **timing options** spread into it.
+
+```ts
+{duration: 0.4, easing: 'easeOut', delay: 0.1, repeat: 2, repeatMode: 'reverse'}
+```
+
+#### Eased transitions
+
+```ts
+{duration: 0.4}                                     // linear
+{duration: 0.4, easing: 'easeInOut'}                // a preset
+{duration: 0.6, easing: [0.3, 1.6, 0.6, 1]}         // a cubic Bézier, as in CSS cubic-bezier()
+{duration: 1, easing: [4, 'jumpStart']}             // steps, as in CSS steps()
+{duration: 0}                                       // jumps straight to the end values
+```
+
+| Easing | Values |
+|---|---|
+| Presets | `'linear'`, `'ease'`, `'easeIn'`, `'easeOut'`, `'easeInOut'`, the same curves as CSS's |
+| Cubic Bézier | `[x1, y1, x2, y2]`. `x1` and `x2` must be within 0–1. `y` can go past 0–1 to overshoot. |
+| Steps | `[count, position?]`. `position` is `'jumpStart'`, `'jumpEnd'` (the default), `'jumpNone'` or `'jumpBoth'`. `count` is a whole number, at least 1, or 2 for `'jumpNone'`. |
+
+`cubicBezier(x1, y1, x2, y2)` and `steps(count, position?)` write the same easings by name:
+
+```ts
+import {cubicBezier, steps} from "timesfps";
+
+{duration: 0.6, easing: cubicBezier(0.3, 1.6, 0.6, 1)}
+{duration: 1, easing: steps(4, 'jumpStart')}
+```
+
+#### Springs
+
+Springs come in three kinds. You pick one by the fields you give, and each works out how long it runs.
+
+| Kind | Fields | How long it runs |
+|---|---|---|
+| Duration | `duration`, `bounce`, `velocity?` | Comes to rest exactly at `duration`. |
+| Visual | `visualDuration`, `bounce`, `velocity?` | `visualDuration` sets how fast it swings; it runs on until it's at rest. |
+| Physical | `stiffness`, `damping`, `mass?`, `velocity?`, `restDelta?` | Until it's at rest, as in `m·x″ = −k·x − c·x′`. `mass` defaults to 1. |
+
+```ts
+{duration: 0.6, bounce: 0.3}
+{visualDuration: 0.4, bounce: 0.2}
+{stiffness: 260, damping: 22, mass: 1}
+```
+
+- **`bounce`** is between -1 and 1. 0 doesn't overshoot, towards 1 it bounces more, and below 0 it creeps in more slowly. It's required.
+- **`velocity`** is the starting speed, in progress per second.
+- **`restDelta`** is how close to the target counts as at rest, between 0 and 1. Other springs use 0.001.
+- **Durations, stiffness, damping and mass** must be positive.
+- **One kind per transition.** Fields from different kinds, such as `easing` with `bounce`, or `duration` with `stiffness`, throw.
+
+#### Delay and repeats
+
+| Option | Meaning | Default |
+|---|---|---|
+| `delay` | Seconds before the first play, or a stagger. It isn't repeated. | `0` |
+| `repeat` | Plays after the first. `Infinity` repeats forever. | `0` |
+| `repeatDelay` | Seconds between plays, never after the last. | `0` |
+| `repeatMode` | How every other play runs. | `'loop'` |
+
+| `repeatMode` | Every other play |
+|---|---|
+| `'loop'` | starts from the beginning again. |
+| `'reverse'` | runs backwards in time, easing included. |
+| `'mirror'` | swaps the start and end values, but keeps the easing running forwards. A mirrored spring settles the same way each time. |
+
+`NaN` and infinite times throw. Negative delays and repeats become 0, and a fractional `repeat` rounds down.
+
+#### Staggers
+
+A stagger gives each element its own delay, from its index among the target's elements:
+
+```ts
+import {stagger} from "timesfps";
+
+stagger({each: 0.05})                                 // 0, 0.05, 0.1, …
+stagger({amount: 0.4, from: 'center'})                // the farthest elements wait 0.4 s
+stagger({each: 0.05, from: 'last', easing: 'easeOut'})
+```
+
+| Option | Meaning |
+|---|---|
+| `each` | Seconds between neighbouring elements. |
+| `amount` | Seconds the farthest element waits. Give either `each` or `amount`. |
+| `from` | Where the stagger starts: `'first'` (the default), `'last'`, `'center'`, or an index. |
+| `easing` | Spreads the delays along an easing instead of evenly. |
+
+A stagger is just a function `(index, total) => seconds`, so you can pass your own as `delay` too. `each`, `amount` and an index `from` must be finite numbers.
+
+#### A timing for each property
+
+To give properties their own timing, pass a timing per property instead. Every property in `values` needs one:
+
+```ts
+animation('.card', {translate: [40, 0], opacity: [0, 1]}, {
+    translate: {duration: 0.6, bounce: 0.2},
+    opacity: {duration: 0.2}
+}).play();
+```
+
+The properties start together, and each runs on its own timing.
+
+### Options
+
+| Option | Meaning | Default |
+|---|---|---|
+| `composite` | How the values combine with what's under them: `'replace'`, `'add'` or `'accumulate'`, as in WAAPI. | `'replace'` |
+| `fill` | Whether it holds its start values before it starts and its end values after it ends: `'none'`, `'backwards'`, `'forwards'` or `'both'`, as in WAAPI. | what the overlap rules give it (see Overlaps) |
+
+```ts
+animation('.badge', {translate: [0, 12]}, {duration: 0.3}, {composite: 'add', fill: 'none'});
+```
+
+- **`fill: 'none'`** stops showing once it ends, so whatever is under it shows again.
+- **`fill: 'backwards'`** holds its start values even while an earlier animation runs.
+
+<br/><br/>
+
+## `sequence`
+
+```ts
+sequence()
+    .add(target, values, timing, options?)
+    .add(definition, placement?)
+    .build(timingOptions?)
+```
+
+A sequence lays **entries** out in time. An entry is an animation, written inline or as an `animation()` definition, or another sequence.
+
+- **Inline:** `add(target, values, timing, options?)` takes the same arguments as `animation()`. Its options also take the entry's placement: `{composite?, fill?, name?, at?}`.
+- **A definition:** `add(definition, placement?)` takes an `animation()` definition or a built sequence, with `{name?, at?}`.
+- **`build(timingOptions?)`** gives you a `SequenceDefinition`. It takes the sequence's own `delay`, which can be a stagger, and its repeat options.
+
+```ts
+const fadeIn = animation('.note', {opacity: [0, 1]}, {duration: 0.3});
+
+const intro = sequence()
+    .add('h1', {opacity: [0, 1]}, {duration: 0.6, bounce: 0.2}, {name: 'title'})
+    .add(fadeIn, {at: 'title<+0.2'})
+    .build();
+```
+
+**Builders are immutable.** Each `add` returns a new builder, so you can branch from one without the branches affecting each other. A sequence with no entries throws when you build it.
+
+### Names
+
+- `name` lets later positions refer to an entry. Entries without one can't be referred to.
+- Names can only contain letters, digits and underscores, and must be unique within their sequence.
+- A position can only refer to a name given before it. The types check this too.
+
+### Positions
+
+An entry's `at` says when it starts. Positions are relative to the **previous entry** by default.
+
+| Position | Starts |
+|---|---|
+| omitted | when the previous entry ends, the same as `'>'` |
+| `1.5` | 1.5 seconds after the sequence starts |
+| `'>'` | when the previous entry ends |
+| `'+0.2'` or `'>+0.2'` | 0.2 seconds after the previous entry ends |
+| `'-0.3'` or `'>-0.3'` | 0.3 seconds before the previous entry ends |
+| `'<'` | when the previous entry starts |
+| `'<+0.1'`, `'<-0.1'` | 0.1 seconds after or before the previous entry starts |
+| `'>>'` | when everything so far has ended |
+| `'>>+0.5'`, `'>>-0.5'` | 0.5 seconds after or before everything so far has ended |
+| `'title>'`, `'title+0.2'`, `'title>+0.2'` | relative to when the entry named `title` ends |
+| `'title<'`, `'title<+0.2'` | relative to when the entry named `title` starts |
+
+**Shares of an entry.** An offset can be a percentage instead of seconds.
+
+| Position | Starts |
+|---|---|
+| `'<+25%'` | a quarter of the way through the previous entry |
+| `'-25%'` | a quarter of the previous entry before it ends, the same as `'<+75%'` |
+| `'title<+50%'` | halfway through `title` |
+| `'>>-25%'` | a quarter of everything so far, before it ends |
+| `'-=25%'` | a quarter of **this** entry before the previous entry ends |
+| `'<+=50%'` | half of **this** entry after the previous entry starts |
+| `'title+=10%'` | a tenth of **this** entry after `title` ends |
+
+- **`%`** is a share of the entry the position refers to.
+- **`=%`** is a share of the entry being added.
+- An entry's length, for shares, runs from when it first starts to when it ends, repeats included.
+
+**Rules.**
+
+- The first entry's previous entry is the start of the sequence, and so is "everything so far".
+- An entry that repeats forever counts as ending after its first play.
+- A position that lands before the start of the sequence starts at its start.
+
+**These throw** as the entry is added:
+
+| Position | Why |
+|---|---|
+| `'+=1'` | `=` only goes with `%`. |
+| `'<0.2'` | Offsets need a sign: `'<+0.2'`. |
+| `'title'` | A name needs `<`, `>` or an offset after it. |
+| `'title>>'`, `'<<'` | Not positions. |
+| `'later<'` | `later` isn't an earlier entry. |
+| `'+abc'`, `'+Infinity'` | Not a finite number. |
+
+### Nesting and repeating
+
+Sequences nest, and take the same repeat options as animations:
+
+```ts
+const card = sequence()
+    .add('.card', {scale: [1, 1.05]}, {duration: 0.3, easing: 'easeOut'})
+    .add('.card .icon', {opacity: [0.6, 1]}, {duration: 0.5}, {at: '<'})
+    .build({repeat: 2, repeatDelay: 0.5, repeatMode: 'reverse'});
+
+const page = sequence()
+    .add(intro, {name: 'intro'})
+    .add(card, {at: '-0.2'})
+    .build();
+```
+
+- A nested sequence is one entry of the outer one. Its own positions only place its entries within it.
+- Positions never refer into a nested sequence.
+- **Repeats compound.** An animation that repeats inside a repeating sequence plays all of its repeats in every iteration of the sequence.
+- **Infinite repeats inside.** An animation that repeats forever plays only its first iteration in each iteration of the sequence, and carries on repeating once the sequence is done.
+- For a sequence, `'reverse'` reverses the whole iteration in time. `'mirror'` does the same, but keeps each animation's easing running forwards through swapped values.
+
+### Staggered sequences
+
+A sequence's `delay` can be a stagger. The sequence then plays once for each element index: the copy at index 2 plays the third element of each of its animations, and its positions chain within that copy alone.
+
+```ts
+sequence()
+    .add('.card', {scale: [1, 1.05]}, {duration: 0.3}, {name: 'lift'})
+    .add('.card .icon', {opacity: [0, 1]}, {duration: 0.5})
+    .build({delay: stagger({each: 0.1})})
+    .play();
+```
+
+- Each card's icon fades in once that card has lifted.
+- Every animation inside a staggered sequence needs as many elements as the others, or playing throws.
+- A stagger inside it gives each index its own delay, which pushes that entry on in that copy only.
 
 ### Overlaps
 
-When entries animate the same property of the same element, the one declared later shows over the earlier one while it runs. An earlier entry that falls entirely within a later one is dropped, unless the later one adds to it. Only the entry that starts first holds its start values before it starts. An entry holds its end values after it ends, unless one declared before it is still running. A mapping's `fill` overrides both.
+When entries animate the same property of the same element:
+
+- The one added later shows over the earlier one while it runs.
+- An earlier entry that falls entirely within a later one never shows, unless the later one adds to it.
+- Only the entry that starts first holds its start values before it starts.
+- An entry holds its end values after it ends, unless one added before it is still running.
+- An entry's `fill` overrides both.
 
 <br/><br/>
 
-## Not Yet Supported
+## Reusable Timings
 
-- Properties that take more than one value at once, like `transform` or a two-value `translate`, where values need numbers. Use individual properties or a registered custom property instead.
+`animation()` and `sequence()` also take timing on its own, as objects you can keep and reuse anywhere. A timing never knows what it animates: it only says how a change from 0 to 1 unfolds in time.
+
+### `AnimationTiming`
+
+```ts
+import {AnimationTiming} from "timesfps";
+
+const rise = AnimationTiming.of({duration: 0.6, bounce: 0.2}, {delay: 0.1, repeat: 1});
+
+animation('.card', {translate: [40, 0]}, rise);
+animation('.panel', {opacity: [0, 1]}, rise);
+```
+
+`AnimationTiming.of(transition, timingOptions?)` checks everything as soon as you call it, so mistakes throw where you make them. It goes wherever a timing does: as `animation()`'s timing, as an inline entry's timing, or as one property's timing.
+
+### `SequenceTiming`
+
+A sequence timing lays out named timings, without targets or values:
+
+```ts
+import {SequenceTiming} from "timesfps";
+
+const reveal = SequenceTiming.builder()
+    .add('title', rise)
+    .add('subtitle', {duration: 0.4, easing: 'easeOut'}, '-0.3')
+    .add('cta', {stiffness: 300, damping: 20}, 'title<+50%')
+    .build({repeat: 1, repeatMode: 'reverse'});
+```
+
+- **`add(name, timing, at?)`**: the name is required, because the mapping refers to entries by it. The timing is an `AnimationTiming`, a transition with its options, or another `SequenceTiming`. Positions work as in `sequence()`.
+- **`build(timingOptions?)`** takes the same options as a sequence's `build`.
+- Builders are immutable here too.
+
+To play it, give `sequence()` the timing and a **mapping** of the same shape, keyed by entry name. Each node takes `target` and `values`, with `composite` and `fill` next to them, and a nested sequence timing takes a nested mapping:
+
+```ts
+sequence(reveal, {
+    title: {target: 'h1', values: {opacity: [0, 1], translate: [-40, 0]}},
+    subtitle: {target: 'h2', values: {opacity: [0, 1]}, fill: 'none'},
+    cta: {target: '#cta', values: {scale: [0.8, 1]}}
+}).play();
+```
+
+The mapping has to name every entry, and the types check it. What you get back is a `SequenceDefinition`, the same as from `build()`, so you can play it or add it to another sequence.
 
 <br/><br/>
 
-## API Overview
+## Controls
 
-- **Transitions**
-    - `eased(duration, easing?)`: a timed transition with a CSS easing.
-    - `cubicBezier(x1, y1, x2, y2)` and `steps(count, position?)`: easings for `eased`.
-    - `spring(options)`: a duration, visual or physical spring.
-- **`animation(transition, options?)`**, or **`AnimationDefinition.of(transition, options?)`**: an animation, with `delay`, `repeatCount`, `repeatDelay` and `repeatMode`.
-- **`stagger(each, {from?, easing?})`**: a per-target delay.
-- **`Sequence.builder()`**: builds a sequence.
-    - `.add(name, animation, position?)`, `.add(name, {...transition, ...options}, position?)` or `.add(name, sequence, position?)` adds an entry.
-    - `.build(options?)` takes a `delay`, which can be a stagger, and the repeat options.
-- **`animate(definition, mapping, {scope?, autoplay?}?)`**: plays a definition on elements and returns its `AnimationControls`.
-- **`sequence(options?)`**: builds a sequence with its targets and values.
-    - `.add(name?, target, values, animation, position?)` or `.add(name?, sequence, position?)` adds an entry; the animation can be `{...transition, ...options, composite?, fill?}` or `{animation, composite?, fill?}`.
-    - `.animate({scope?, autoplay?}?)` plays it.
+```ts
+const controls = definition.play({scope});
+```
 
-Everything is exported from the root `timesfps` entry point, along with the types of every option and mapping.
+- `play()` looks up the targets and reads the current values at that moment, and starts playing right away. To start paused, call `pause()` right after it; nothing moves in between.
+- `scope` is where selectors and target functions look for elements. It defaults to `document.documentElement`.
+- Each `play()` starts a fresh set of animations with their own controls.
+
+| Control | What it does |
+|---|---|
+| `play()`, `pause()` | Plays or pauses everything together. |
+| `cancel()` | Stops everything and removes its effects. |
+| `finish()` | Jumps to the end. It throws while an animation repeats forever. |
+| `seek(time)` | Moves to `time`, in seconds from the start of the definition. |
+| `playbackRate` | Gets or sets the speed: 1 is normal, 2 twice as fast, negative plays backwards. |
+| `startTime` | Gets or sets when it starts on the document timeline, in seconds, or `null` until that's resolved. |
+| `finished` | A promise that settles once every animation has finished, so never while one repeats forever. |
+| `onFinish(listener)`, `onCancel(listener)` | Calls the listener each time every animation has finished, or been canceled. Returns a function that removes it. |
+| `animations` | The native `Animation` objects. |
+
+- Animations hold their end values after they end. To let go of them, cancel the controls once they've finished.
+- Each native animation's `id` is its entry's path and its property, such as `intro>title:opacity`, or just the property for an animation on its own. Unnamed entries are named `a`, `b`, … in their order.
+
+<br/><br/>
+
+## Migrating
+
+### From Motion
+
+```ts
+// Motion
+animate('.card', {opacity: [0, 1]}, {type: 'spring', duration: 0.6, bounce: 0.2, delay: stagger(0.1)});
+
+// timesfps
+animation('.card', {opacity: [0, 1]}, {duration: 0.6, bounce: 0.2, delay: stagger({each: 0.1})}).play();
+```
+
+| Motion | timesfps |
+|---|---|
+| `animate(target, keyframes, options)` | `animation(target, values, timing).play()` |
+| `ease` | `easing`, with the same preset names and cubic Bézier arrays |
+| `type: 'spring'` with `stiffness`, `damping`, `mass` | `{stiffness, damping, mass}` |
+| `type: 'spring'` with `duration`, `bounce` | `{duration, bounce}`, with `bounce` required |
+| `visualDuration`, `bounce` | `{visualDuration: 1.2 × Motion's, bounce}`; see below |
+| `repeat`, `repeatDelay` | `repeat`, `repeatDelay` |
+| `repeatType` | `repeatMode`, with the same `'loop'`, `'reverse'` and `'mirror'` |
+| `stagger(0.1, {from, ease})` | `stagger({each: 0.1, from, easing})` |
+| `[null, 100]` | `[null, 100]` |
+| `x`, `y`, `scale`, `rotate` | CSS's individual properties: `translate`, `scale`, `rotate` |
+| `animate([[target, keyframes, {at}], …])` | `sequence().add(target, values, timing, {at}) … .build().play()` |
+| `at: '<'`, `'+0.5'`, `'-0.2'` | the same |
+| Labels | entry names: `{name: 'title'}`, then `'title<'` or `'title>'` |
+| `useAnimate`'s scope | `play({scope})` |
+| `time`, `speed` | `seek(time)`, `playbackRate` |
+| `complete()`, `then()` | `finish()`, `finished` |
+
+Things that work differently:
+
+- **One easing across all values.** Motion eases each segment between keyframes on its own. Here, the easing runs once from 0 to 1, and the values change linearly with progress between their keys. Motion's `times` are fractions of the time; keys here are progress.
+- **Timing is always given.** Motion picks a default transition per property. Here, every animation states its own.
+- **Definitions play when you call `play()`.** Motion's `animate` starts right away.
+- **Springs.**
+    - The same `visualDuration` swings 1.2 times faster here, so pass 1.2 × Motion's.
+    - `bounce` keeps having an effect up to ±1. Motion stops at ±0.95.
+    - A negative `bounce` makes the spring arrive later. Motion keeps the arrival time and only changes the shape.
+    - `bounce` is required, where Motion defaults it to 0.3.
+    - Every spring takes `velocity`. Motion ignores it on springs given by a duration.
+    - A spring settles into its end value without jumping. Motion jumps to it once it's close enough.
+
+### From GSAP
+
+```ts
+// GSAP
+gsap.from('.card', {opacity: 0, y: 20, duration: 0.4, ease: 'power2.out', stagger: 0.1});
+
+// timesfps
+animation('.card', {opacity: [0, null], '--y': ['20px', null]}, {
+    duration: 0.4, easing: 'easeOut', delay: stagger({each: 0.1})
+}).play();
+```
+
+| GSAP | timesfps |
+|---|---|
+| `gsap.to(target, {opacity: 1})` | `animation(target, {opacity: 1}, timing)` |
+| `gsap.from(target, {opacity: 0})` | `{opacity: [0, null]}` or `{opacity: {0: 0}}` |
+| `gsap.fromTo(target, {opacity: 0}, {opacity: 1})` | `{opacity: [0, 1]}` |
+| `gsap.set(target, vars)` | `{duration: 0}` |
+| `ease: 'power2.out'` | `easing`: a preset, or a cubic Bézier close to the curve |
+| `repeat: -1` | `repeat: Infinity` |
+| `yoyo: true` | `repeatMode: 'reverse'` |
+| `repeatDelay` | `repeatDelay` |
+| `stagger: 0.1` | `delay: stagger({each: 0.1})` |
+| `stagger: {each, amount, from, ease}` | `stagger({each, amount, from, easing})`. `from: 'start'` is `'first'`, and `'end'` is `'last'`. There's no `'edges'`, `'random'` or `grid`. |
+| `x: 100` | `translate: 100` |
+| `y: 20` | a registered custom property, as `'--y'` above (see Values) |
+| `gsap.timeline().to(target, vars, position)` | `sequence().add(target, values, timing, {at})` |
+| Timeline `defaults` | a timing kept in a variable, or an `AnimationTiming` |
+| `timeScale()`, `seek()`, `then()` | `playbackRate`, `seek()`, `finished` |
+
+**Positions.** GSAP's default and its `+=`/`-=` are relative to the end of everything so far; here they're relative to the previous entry, and `>>` is "everything so far".
+
+| GSAP | timesfps |
+|---|---|
+| omitted | `'>>'` |
+| `'+=1'`, `'-=0.5'` | `'>>+1'`, `'>>-0.5'` |
+| `'<'`, `'>'`, `'>-0.5'` | the same |
+| `'<0.5'`, `'<+=0.5'` | `'<+0.5'` |
+| `'label'`, `'label+=1'` | name the entry, then `'title<'` or `'title<+1'` |
+| `'<25%'` | `'<+25%'` |
+| `'-=25%'` | `'>>-=25%'` |
+| `'<+=25%'` | the same |
+
+### From the Web Animations API
+
+```ts
+// WAAPI
+element.animate({opacity: [0, 1]}, {duration: 400, easing: 'ease-out', iterations: 3, direction: 'alternate', fill: 'forwards'});
+
+// timesfps
+animation(element, {opacity: [0, 1]}, {duration: 0.4, easing: 'easeOut', repeat: 2, repeatMode: 'reverse'}, {fill: 'forwards'}).play();
+```
+
+| WAAPI | timesfps |
+|---|---|
+| Milliseconds | Seconds |
+| `easing: 'ease-out'` | `easing: 'easeOut'` |
+| `'cubic-bezier(…)'`, `'steps(4, jump-start)'` | `[x1, y1, x2, y2]`, `[4, 'jumpStart']` |
+| `iterations: 3` | `repeat: 2`, the plays after the first |
+| `iterations: Infinity` | `repeat: Infinity` |
+| `direction: 'alternate'` | `repeatMode: 'reverse'` |
+| Keyframe `offset` | progress keys, which mean the same: positions along the eased progress |
+| A single keyframe | a single value |
+| `composite` | `composite` |
+| `fill` | `fill`; without it, the overlap rules decide what holds, and end values hold |
+| `animation.currentTime = ms` | `controls.seek(seconds)` |
+| `play()`, `pause()`, `cancel()`, `finish()`, `finished`, `playbackRate`, `startTime` | the same, in seconds |
+
+There's no counterpart for `direction: 'reverse'` or `'alternate-reverse'` (swap your values instead), `iterationStart`, `endDelay`, fractional iterations, or an easing per keyframe.
