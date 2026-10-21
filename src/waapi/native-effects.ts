@@ -1,5 +1,6 @@
 import type {CubicBezier} from "../cubic-bezier.ts";
-import {CubicBezierEasing, type CubicBezierEasingDescriptor, type EasingFunction, LinearEasing, linear, SpringEasing, StepsEasing} from "../easing.ts";
+import {CubicBezierEasing, type Easing, LinearEasing, SpringEasing, StepsEasing} from "../easing.ts";
+import {type CubicBezierEasingParams, linear} from "../easing-specifier.ts";
 import type {DampedSpring} from "../damped-spring.ts";
 import type {PropertyStops, StopValue} from "../resolution/stops.ts";
 import type {EntryPath} from "../resolution/layout.ts";
@@ -121,9 +122,9 @@ function runsOnEffect({easing, stops}: TrackSpan): boolean {
     return easing.isWhole && !(easing instanceof SpringEasing) && stops.stops.every(({progress}) => progress >= 0 && progress <= 1);
 }
 
-function wholeNativeEasingOf(easing: EasingFunction): NativeEasing {
-    if (easing instanceof CubicBezierEasing) return {type: 'cubic-bezier', definition: easing.definition};
-    if (easing instanceof StepsEasing) return {type: 'steps', definition: easing.definition};
+function wholeNativeEasingOf(easing: Easing): NativeEasing {
+    if (easing instanceof CubicBezierEasing) return {type: 'cubic-bezier', definition: easing.params};
+    if (easing instanceof StepsEasing) return {type: 'steps', definition: easing.params};
     return {type: 'linear'};
 }
 
@@ -163,7 +164,7 @@ interface KeyframedPiece<Value = number> {
 interface CurveSegment {
     startOffset: number;
     endOffset: number;
-    easing: EasingFunction;
+    easing: Easing;
     fromProgress: Progress;
     toProgress: Progress;
 }
@@ -176,7 +177,7 @@ function keyframedPiecesOf({easing, stops}: TrackSpan): KeyframedPiece[] {
 }
 
 /** A spring as the segments of its fitted spline within the window; any other easing as one segment. */
-function curveSegmentsOf(easing: EasingFunction): CurveSegment[] {
+function curveSegmentsOf(easing: Easing): CurveSegment[] {
     if (!(easing instanceof SpringEasing))
         return [{startOffset: 0, endOffset: 1, easing, fromProgress: 0, toProgress: 1}];
 
@@ -269,7 +270,7 @@ interface NativePiece {
 }
 
 /** The window as native easings that run from `startEased` to `endEased`, which steps only reach as they jump past them. */
-function nativePiecesOf(easing: EasingFunction, startEased: Progress, endEased: Progress): NativePiece[] {
+function nativePiecesOf(easing: Easing, startEased: Progress, endEased: Progress): NativePiece[] {
     if (startEased === endEased || easing instanceof LinearEasing) return [{offset: 1, progress: 1}];
     if (easing instanceof CubicBezierEasing) return cubicBezierPiecesOf(easing);
     if (easing instanceof StepsEasing) return [{offset: 1, progress: 1, easing: stepsEasingOf(easing, startEased, endEased)}];
@@ -298,7 +299,7 @@ function cubicBezierPiecesOf(easing: CubicBezierEasing): NativePiece[] {
 interface StretchedPiece {
     offset: number;
     progress: Progress;
-    definition: CubicBezierEasingDescriptor;
+    definition: CubicBezierEasingParams;
 }
 
 /**
@@ -326,7 +327,7 @@ function isWithinTime(x: number): boolean {
 }
 
 /** The control points of the curve stretched to run from (0, 0) to (1, 1). */
-function stretchedDefinitionOf(curve: CubicBezier): CubicBezierEasingDescriptor {
+function stretchedDefinitionOf(curve: CubicBezier): CubicBezierEasingParams {
     const {start, end} = curve;
     const stretch = ({x, y}: { x: number; y: number }) => [invLerp(x, start.x, end.x), invLerp(y, start.y, end.y)] as const;
     return [...stretch(curve.control1), ...stretch(curve.control2)];
@@ -334,7 +335,7 @@ function stretchedDefinitionOf(curve: CubicBezier): CubicBezierEasingDescriptor 
 
 /** The window's levels as a `linear()` with hard jumps, or the steps themselves when the window is the whole easing and runs 0 to 1. */
 function stepsEasingOf(easing: StepsEasing, startEased: Progress, endEased: Progress): NativeEasing {
-    if (easing.isWhole && startEased === 0 && endEased === 1) return {type: 'steps', definition: easing.definition};
+    if (easing.isWhole && startEased === 0 && endEased === 1) return {type: 'steps', definition: easing.params};
 
     const bounds = [0, ...easing.jumpOffsets(), 1];
     const points: LinearPoint[] = [{input: 0, output: 0}];

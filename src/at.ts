@@ -96,14 +96,14 @@ export function parsePositionDescriptor<Name extends string>(at: At<Name>): Posi
     return {reference, anchor, offset};
 }
 
-/** A position's offsets must be finite, and the entry it refers to must come before it; `entry` names the entry in messages. */
-export function checkPositionDescriptor(entry: string, position: PositionDescriptor<string>, earlierNames: readonly string[]): void {
+/** A position's offsets must be finite, and the entry it refers to must come before it; `label` names the entry in messages. */
+export function checkPositionDescriptor(position: PositionDescriptor<string>, earlierNames: readonly string[], label: string): void {
     const {seconds, referenceFraction, selfFraction} = position.offset;
-    checkNumber(seconds, `${entry}'s position offset in seconds`);
-    checkNumber(referenceFraction, `${entry}'s position offset in shares of the reference duration`);
-    checkNumber(selfFraction, `${entry}'s position offset in shares of its own duration`);
+    checkNumber(seconds, `${label}'s position offset in seconds`);
+    checkNumber(referenceFraction, `${label}'s position offset in shares of the reference duration`);
+    checkNumber(selfFraction, `${label}'s position offset in shares of its own duration`);
     if (position.reference.kind === 'entry' && !earlierNames.includes(position.reference.name))
-        throw new Error(`${entry}'s position refers to "${position.reference.name}", which isn't an earlier entry.`);
+        throw new Error(`${label}'s position refers to "${position.reference.name}", which isn't an earlier entry.`);
 }
 
 /**

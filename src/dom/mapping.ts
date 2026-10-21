@@ -11,7 +11,6 @@ export interface PlayOptions {
     scope?: Element;
 }
 
-/** A number, a number with a unit, or a CSS expression that resolves to one. */
 export type CSSValue = number | string;
 
 /** One value to animate to, values listed evenly from 0 to 1, or values keyed by progress; `null` at an end stands for the value underneath. */
@@ -31,11 +30,13 @@ export interface AnimationMapping {
 }
 
 /** A sequence timing's targets and values, keyed by entry name, with a nested mapping for each nested sequence timing. */
-export type SequenceMapping<Timing extends SequenceTiming> = Timing extends SequenceTiming<infer SE> ? SequenceMappingOf<SE> : never;
-
-type SequenceMappingOf<SE extends SequenceTimingEntries> = {
-    [N in keyof SE]: SE[N] extends SubsequenceTimingEntry<infer NS> ? SequenceMapping<NS> : AnimationMapping;
-};
+export type SequenceMapping<Timing extends SequenceTiming> = Timing extends SequenceTiming<infer SE> ?
+    {
+        [N in keyof SE]: SE[N] extends SubsequenceTimingEntry<infer NS> ?
+            SequenceMapping<NS> :
+            AnimationMapping;
+    } :
+    never;
 
 /** A mapping as it's played: a leaf for each animation, and a node for each sequence. */
 export type MappingTree = AnimationMapping | SequenceMappingNode;

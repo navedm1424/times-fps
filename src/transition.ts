@@ -1,6 +1,7 @@
 import {PRECISION} from "./constants.ts";
 import {DampedSpring} from "./damped-spring.ts";
-import {type EasingDescriptor, type EasingFunction, linear, resolveEasing, SpringEasing} from "./easing.ts";
+import {type Easing, SpringEasing} from "./easing.ts";
+import {checkEasingSpecifier, type EasingSpecifier, linear, resolveEasing} from "./easing-specifier.ts";
 import type {Progress, Seconds} from "./types.ts";
 import {checkNumber, checkPositive} from "./utils/validation.ts";
 
@@ -23,7 +24,7 @@ type OtherKeysExcluded<Kind extends TransitionKind> = { [Key in Exclude<Transiti
 /** A timed transition with an easing; it's the kind a `duration` without a `bounce` is. */
 export interface EasedTransitionOptions extends OtherKeysExcluded<"eased"> {
     duration: Seconds;
-    easing?: EasingDescriptor;
+    easing?: EasingSpecifier;
 }
 
 /** Shaped by `bounce` and stretched so it comes to rest at the end of `duration`. */
@@ -93,6 +94,7 @@ export function checkTransitionOptions(transition: TransitionOptions, label: str
             requireNumber(transition.duration, `${label}'s duration`);
             if (checkNumber(transition.duration, `${label}'s duration`) < 0)
                 throw new RangeError(`${label}'s duration can't be negative, not ${transition.duration}.`);
+            if (transition.easing !== undefined) checkEasingSpecifier(transition.easing, `${label}'s easing`);
             return;
         case 'physicalSpring': {
             requireNumber(transition.stiffness, `${label}'s stiffness`);
@@ -126,8 +128,16 @@ function requireNumber(value: number | undefined, label: string): asserts value 
     if (typeof value !== 'number') throw new TypeError(`${label} is required.`);
 }
 
-/** How long one play of the transition lasts, and the easing it runs. */
-export function resolveTransition(transition: TransitionOptions): { duration: Seconds; easing: EasingFunction } {
+const resolvedTransitions = new WeakMap<TransitionOptions, { duration: Seconds; easing: Easing }>();
+
+/** How long one play of the transition lasts, and the easing it runs; each transition is resolved once. */
+export function resolveTransition(transition: TransitionOptions): { duration: Seconds; easing: Easing } {
+    let resolved = resolvedTransitions.get(transition);
+    if (!resolved) resolvedTransitions.set(transition, resolved = resolvedTransitionOf(transition));
+    return resolved;
+}
+
+function resolvedTransitionOf(transition: TransitionOptions): { duration: Seconds; easing: Easing } {
     switch (transitionKindOf(transition)) {
         case 'eased': {
             const {duration, easing} = transition as EasedTransitionOptions;
@@ -149,7 +159,7 @@ export function resolveTransition(transition: TransitionOptions): { duration: Se
 }
 
 /** A spring runs until it comes to rest. */
-function springTimingOf(spring: DampedSpring, restDelta: Progress): { duration: Seconds; easing: EasingFunction } {
+function springTimingOf(spring: DampedSpring, restDelta: Progress): { duration: Seconds; easing: Easing } {
     const duration = spring.restTime(restDelta);
     return {duration, easing: new SpringEasing(spring, duration)};
 }

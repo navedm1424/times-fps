@@ -3,7 +3,7 @@ import {AnimationTiming, TimedTweenTiming} from "../src/animation.ts";
 import {DampedSpring} from "../src/damped-spring.ts";
 import {PRECISION} from "../src/constants.ts";
 import {stagger} from "../src/stagger.ts";
-import type {TransitionOptions} from "../src/transition.ts";
+import {resolveTransition, type TransitionOptions} from "../src/transition.ts";
 
 describe("AnimationTiming.of", () => {
     it("rejects time fields that aren't finite", () => {
@@ -45,10 +45,11 @@ describe("AnimationTiming.of", () => {
     });
 
     it("tells the kinds of transition apart by their keys, and rejects keys of another kind", () => {
-        expect(AnimationTiming.of({duration: 1, easing: 'easeIn'}).easing.constructor.name).toBe('CubicBezierEasing');
-        expect(AnimationTiming.of({duration: 1, bounce: 0.2}).duration).toBe(1);
-        expect(AnimationTiming.of({visualDuration: 0.5, bounce: 0.2}).easing.constructor.name).toBe('SpringEasing');
-        expect(AnimationTiming.of({stiffness: 100, damping: 10}).easing.constructor.name).toBe('SpringEasing');
+        const resolved = (transition: TransitionOptions) => resolveTransition(AnimationTiming.of(transition).transition);
+        expect(resolved({duration: 1, easing: 'easeIn'}).easing.constructor.name).toBe('CubicBezierEasing');
+        expect(resolved({duration: 1, bounce: 0.2}).duration).toBe(1);
+        expect(resolved({visualDuration: 0.5, bounce: 0.2}).easing.constructor.name).toBe('SpringEasing');
+        expect(resolved({stiffness: 100, damping: 10}).easing.constructor.name).toBe('SpringEasing');
         const mixed = (transition: object) => () => AnimationTiming.of(transition as TransitionOptions);
         expect(mixed({duration: 1, easing: 'easeIn', bounce: 0.2})).toThrow(TypeError);
         expect(mixed({duration: 1, stiffness: 100, damping: 10})).toThrow(TypeError);

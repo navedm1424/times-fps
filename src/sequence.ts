@@ -1,4 +1,4 @@
-import {AnimationTiming, type AnimationTimingDescriptor, type TimedTweenTiming} from "./animation.ts";
+import {AnimationTiming, type AnimationTimingOptions, type TimedTweenTiming} from "./animation.ts";
 import {type At, checkPositionDescriptor, parsePositionDescriptor, type PositionDescriptor} from "./at.ts";
 import {checkPlaybackOptions, clampedDelay, clampedRepeats, type SequencePlaybackOptions} from "./playback-options.ts";
 
@@ -47,31 +47,31 @@ export class SequenceTimingBuilder<SE extends SequenceTimingEntries = {}> {
     }
 
     add<N extends string>(
+        timing: AnimationTiming | AnimationTimingOptions,
         name: N,
-        timing: AnimationTiming | AnimationTimingDescriptor,
         at?: At<keyof SE & string>
     ): SequenceTimingBuilder<SE & { [_ in N]: AnimationTimingEntry<keyof SE & string> }>;
 
     // add<N extends string, A extends TimedTweenTiming<string[]>>(
-    //     name: N,
     //     timing: A,
+    //     name: N,
     //     at?: At<keyof SE & string>
     // ): SequenceTimingBuilder<SE & { [_ in N]: TimedTweenTimingEntry<A, keyof SE & string> }>;
 
     add<N extends string, NS extends SequenceTiming>(
-        name: N,
         sequence: NS,
+        name: N,
         at?: At<keyof SE & string>
-    ): SequenceTimingBuilder<SE & { [_ in N]: SubsequenceTimingEntry<NS, keyof SE & string>; }>;
+    ): SequenceTimingBuilder<SE & { [_ in N]: SubsequenceTimingEntry<NS, keyof SE & string> }>;
 
     add<N extends string>(
+        timing: AnimationTiming | AnimationTimingOptions | SequenceTiming,
         name: N,
-        timing: AnimationTiming | AnimationTimingDescriptor | SequenceTiming,
-        at?: At<string>
+        at?: At
     ): SequenceTimingBuilder<SE & { [_ in N]: SequenceTimingEntry }> {
         checkNewName(name, this.#names);
         const position = parsePositionDescriptor(at ?? '>');
-        checkPositionDescriptor(`Entry "${name}"`, position, this.#names);
+        checkPositionDescriptor(position, this.#names, `Entry "${name}"`);
 
         const entry: SequenceTimingEntry = timing instanceof SequenceTiming
             ? {sequence: timing, position}

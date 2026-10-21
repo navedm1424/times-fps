@@ -43,7 +43,7 @@ animation('.card', {opacity: [0, 1], scale: [0.95, 1]}, {duration: 0.4, easing: 
 // A springy pulse that ripples out from the middle dot, forever.
 animation('.dot', {scale: [1, 1.4]}, {
     visualDuration: 0.3, bounce: 0.4,
-    delay: stagger({step: 0.05, from: 'center'}),
+    delay: stagger(0.05, {from: 'center'}),
     repeat: Infinity, repeatMode: 'mirror', repeatDelay: 0.6
 }).play();
 
@@ -59,7 +59,7 @@ sequence()
 const cards = sequence()
     .add('.card', {translate: [40, 0]}, {duration: 0.6, bounce: 0.2}, {name: 'lift'})
     .add('.card .icon', {opacity: [0, 1]}, {duration: 0.3}, {at: 'lift<+25%'})
-    .build({delay: stagger({step: 0.1})});
+    .build({delay: stagger(0.1)});
 
 cards.play({scope: featuredList});
 cards.play({scope: archiveList});
@@ -253,6 +253,15 @@ stagger({step: 0.05, from: 'last', easing: 'easeOut'})
 | `from` | Which element goes first: `'first'` (the default), `'last'`, `'center'`, or an index. |
 | `easing` | Spreads the delays along an easing instead of evenly. |
 
+**A number first is the `step`.** `stagger(0.05)` is `stagger({step: 0.05})`, and any other options follow it:
+
+```ts
+stagger(0.05)                             // 0, 0.05, 0.1, …
+stagger(0.05, {from: 'last', easing: 'easeOut'})
+```
+
+`spread` is only given by name, in the object.
+
 A stagger is just a function `(index, total) => seconds`, so you can pass your own as `delay` too. `step`, `spread`, `startDelay` and an index `from` must be finite numbers. A delay that comes out negative becomes 0.
 
 #### A timing for each property
@@ -389,7 +398,7 @@ A sequence's `delay` can be a stagger. The sequence then plays once for each ele
 sequence()
     .add('.card', {scale: [1, 1.05]}, {duration: 0.3}, {name: 'lift'})
     .add('.card .icon', {opacity: [0, 1]}, {duration: 0.5})
-    .build({delay: stagger({step: 0.1})})
+    .build({delay: stagger(0.1)})
     .play();
 ```
 
@@ -433,13 +442,13 @@ A sequence timing lays out named timings, without targets or values:
 import {SequenceTiming} from "timesfps";
 
 const reveal = SequenceTiming.builder()
-    .add('title', rise)
-    .add('subtitle', {duration: 0.4, easing: 'easeOut'}, '-0.3')
-    .add('cta', {stiffness: 300, damping: 20}, 'title<+50%')
+    .add(rise, 'title')
+    .add({duration: 0.4, easing: 'easeOut'}, 'subtitle', '-0.3')
+    .add({stiffness: 300, damping: 20}, 'cta', 'title<+50%')
     .build({repeat: 1, repeatMode: 'reverse'});
 ```
 
-- **`add(name, timing, at?)`**: the name is required, because the mapping refers to entries by it. The timing is an `AnimationTiming`, a transition with its options, or another `SequenceTiming`. Positions work as in `sequence()`.
+- **`add(timing, name, at?)`**: the name is required, because the mapping refers to entries by it. The timing is an `AnimationTiming`, a transition with its options, or another `SequenceTiming`. Positions work as in `sequence()`.
 - **`build(playbackOptions?)`** takes the same options as a sequence's `build`.
 - Builders are immutable here too.
 
@@ -493,7 +502,7 @@ const controls = definition.play({scope});
 animate('.card', {opacity: [0, 1]}, {type: 'spring', duration: 0.6, bounce: 0.2, delay: stagger(0.1)});
 
 // timesfps
-animation('.card', {opacity: [0, 1]}, {duration: 0.6, bounce: 0.2, delay: stagger({step: 0.1})}).play();
+animation('.card', {opacity: [0, 1]}, {duration: 0.6, bounce: 0.2, delay: stagger(0.1)}).play();
 ```
 
 | Motion | timesfps |
@@ -505,7 +514,7 @@ animation('.card', {opacity: [0, 1]}, {duration: 0.6, bounce: 0.2, delay: stagge
 | `visualDuration`, `bounce` | `{visualDuration: 1.2 × Motion's, bounce}`; see below |
 | `repeat`, `repeatDelay` | `repeat`, `repeatDelay` |
 | `repeatType` | `repeatMode`, with the same `'loop'`, `'reverse'` and `'mirror'` |
-| `stagger(0.1, {startDelay, from, ease})` | `stagger({step: 0.1, startDelay, from, easing})` |
+| `stagger(0.1, {startDelay, from, ease})` | `stagger(0.1, {startDelay, from, easing})` |
 | `[null, 100]` | `[null, 100]` |
 | `x`, `y`, `scale`, `rotate` | CSS's individual properties: `translate`, `scale`, `rotate` |
 | `animate([[target, keyframes, {at}], …])` | `sequence().add(target, values, timing, {at}) … .build().play()` |
@@ -536,7 +545,7 @@ gsap.from('.card', {opacity: 0, y: 20, duration: 0.4, ease: 'power2.out', stagge
 
 // timesfps
 animation('.card', {opacity: [0, null], '--y': ['20px', null]}, {
-    duration: 0.4, easing: 'easeOut', delay: stagger({step: 0.1})
+    duration: 0.4, easing: 'easeOut', delay: stagger(0.1)
 }).play();
 ```
 
@@ -550,7 +559,7 @@ animation('.card', {opacity: [0, null], '--y': ['20px', null]}, {
 | `repeat: -1` | `repeat: Infinity` |
 | `yoyo: true` | `repeatMode: 'reverse'` |
 | `repeatDelay` | `repeatDelay` |
-| `stagger: 0.1` | `delay: stagger({step: 0.1})` |
+| `stagger: 0.1` | `delay: stagger(0.1)` |
 | `stagger: {each, amount, from, ease}` | `stagger({step: each, spread: amount, from, easing})`. `from: 'start'` is `'first'`, and `'end'` is `'last'`. There's no `'edges'`, `'random'` or `grid`. |
 | `x: 100` | `translate: 100` |
 | `y: 20` | a registered custom property, as `'--y'` above (see Values) |

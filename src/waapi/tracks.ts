@@ -101,12 +101,12 @@ export class AnimationTracksResolver {
 
     private resolveAnimationRepetitions(layout: AnimationLayout, path: EntryPath | undefined, order: readonly number[], repeatingAncestor: boolean): Contribution {
         const contribution: Contribution = {runs: [], effects: []};
-        const {timing, playDuration} = layout;
+        const {timing, easing, playDuration} = layout;
         const values = this.valuesOf(path ?? '');
         for (const {index, start} of layout.elements) {
             const {element, properties} = values[index]!;
             const runs = Object.entries(properties).map(([property, stops]): KeyedRun =>
-                ({element, property, path, entryStops: stops, order, run: TrackRun.play(playDuration, timing.easing, stops)})
+                ({element, property, path, entryStops: stops, order, run: TrackRun.play(playDuration, easing, stops)})
             );
             const repeated = AnimationTracksResolver.repeated({runs, effects: []}, playDuration, timing.options, repeatingAncestor, order.length);
             const placed = AnimationTracksResolver.shifted(repeated, start);

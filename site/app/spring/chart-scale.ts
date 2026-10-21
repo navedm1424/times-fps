@@ -33,7 +33,7 @@ export function splinePath(points: readonly SplinePoint[], scale: Scale): string
     const commands = [`M${scale.x(first!.time)},${scale.y(first!.progress)}`];
     rest.forEach((to, index) => {
         const from = points[index]!;
-        const [x1, y1, x2, y2] = to.easing?.definition ?? [1 / 3, 1 / 3, 2 / 3, 2 / 3];
+        const [x1, y1, x2, y2] = to.easing?.params ?? [1 / 3, 1 / 3, 2 / 3, 2 / 3];
         const pointAt = (x: number, y: number) =>
             `${scale.x(from.time + (to.time - from.time) * x)},${scale.y(from.progress + (to.progress - from.progress) * y)}`;
         commands.push(`C${pointAt(x1, y1)} ${pointAt(x2, y2)} ${pointAt(1, 1)}`);

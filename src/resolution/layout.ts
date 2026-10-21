@@ -1,4 +1,6 @@
 import type {AnimationTiming} from "../animation.ts";
+import type {Easing} from "../easing.ts";
+import {resolveTransition} from "../transition.ts";
 import {type EntrySpan, resolvePosition} from "../at.ts";
 import {SequenceTiming} from "../sequence.ts";
 import type {Seconds} from "../types.ts";
@@ -46,6 +48,8 @@ export interface ElementStart {
 export interface AnimationLayout extends EntryLayout {
     type: 'animation';
     timing: AnimationTiming;
+    /** The easing one play runs. */
+    easing: Easing;
     elements: readonly ElementStart[];
 }
 
@@ -96,12 +100,13 @@ function animationLayout(timing: AnimationTiming, position: Seconds, path: Entry
     const elements = (lane ? [lane.index] : delays.map((_, index) => index)).map(index => ({index, start: position + delays[index]!}));
     const firstStart = elements.length ? Math.min(...elements.map(({start}) => start)) : position;
     const latestStart = elements.length ? Math.max(...elements.map(({start}) => start)) : position;
-    const playDuration = timing.duration;
+    const {duration: playDuration, easing} = resolveTransition(timing.transition);
     const totalDuration = repeatedDuration(playDuration, repeatOptions);
     const ends = Number.isFinite(totalDuration);
     return {
         type: 'animation',
         timing,
+        easing,
         elements,
         firstStart,
         end: ends ? latestStart + totalDuration : undefined,

@@ -26,7 +26,7 @@ Native animations (WAAPI and CSS) run without JavaScript per frame, but they lea
 | No interruptibility, and a spring that can't be interrupted loses most of its point | Retargeting from the current value and velocity (`retarget`: declared, not implemented yet) |
 | No repeat delays | `repeatDelay`, on animations and sequences |
 | Alternating, but no mirroring | `repeatMode: 'mirror'`: values swap, easing runs forwards |
-| Repeats can't nest | Repeats compound through nested sequences |
+| Repeats can't nest | Repeats compound through subsequences |
 
 ### 1.3 Where it's going
 
@@ -72,7 +72,7 @@ type SpringTransitionOptions =
 
 | Kind | Fields | Told apart by |
 |---|---|---|
-| Eased | `duration: Seconds`, `easing?: EasingDescriptor` | the fallback: a `duration` without `bounce` |
+| Eased | `duration: Seconds`, `easing?: EasingSpecifier` | the fallback: a `duration` without `bounce` |
 | Duration spring | `duration: Seconds`, `bounce: number`, `velocity?: number` | `bounce` with `duration` |
 | Visual spring | `visualDuration: Seconds`, `bounce: number`, `velocity?: number` | `visualDuration` |
 | Physical spring | `stiffness`, `damping`, `mass?`, `velocity?`, `restDelta?: Progress` | `stiffness` and `damping` |
@@ -94,9 +94,9 @@ type SpringTransitionOptions =
 | `bounce` | Strictly between -1 and 1. |
 | `velocity` | A finite number. |
 | `restDelta` | Strictly between 0 and 1. |
-| `easing` | As in §2.3. |
+| `easing` | As in §2.3, through `checkEasingSpecifier`. |
 
-**Resolution** (`resolveTransition`) gives the play's `duration` and its `EasingFunction`: which easing goes with each kind. The spring math behind a spring's easing belongs to the springs themselves (§4):
+**Resolution** (`resolveTransition`) gives the play's `duration` and its `Easing`: which easing goes with each kind. The layout calls it as a definition plays (§5.3), not the timing. Each transition is resolved once and the result kept, so every play of a timing shares one easing, and the spring fits cached on it. The spring math behind a spring's easing belongs to the springs themselves (§4):
 - **Eased:** the duration as given, and `resolveEasing(easing)`, or `linear` without one.
 - **Springs:** the duration below, and a `SpringEasing` over it:
 
@@ -111,13 +111,13 @@ type SpringTransitionOptions =
 
 ### 2.3 Easings
 
-**Descriptors** (`src/easing.ts`):
+**Specifiers** (`src/easing-specifier.ts`):
 
 | Form | Type | Meaning |
 |---|---|---|
 | Preset | `'linear' \| 'ease' \| 'easeIn' \| 'easeOut' \| 'easeInOut'` | CSS's curves, below |
-| Cubic Bézier | `CubicBezierEasingDescriptor = readonly [x1, y1, x2, y2]` | As CSS `cubic-bezier()`. `x1` and `x2` must be within 0–1. |
-| Steps | `StepsEasingDescriptor = readonly [count, position?: StepPosition]` | As CSS `steps()`. `StepPosition` is `'jumpStart' \| 'jumpEnd' \| 'jumpNone' \| 'jumpBoth'`, defaulting to `'jumpEnd'`. `count` is a whole number of at least 1, or 2 for `'jumpNone'`. |
+| Cubic Bézier | `CubicBezierEasingParams = readonly [x1, y1, x2, y2]` | As CSS `cubic-bezier()`. `x1` and `x2` must be within 0–1. |
+| Steps | `StepsEasingParams = readonly [count, position?: StepPosition]` | As CSS `steps()`. `StepPosition` is `'jumpStart' \| 'jumpEnd' \| 'jumpNone' \| 'jumpBoth'`, defaulting to `'jumpEnd'`. `count` is a whole number of at least 1, or 2 for `'jumpNone'`. |
 
 | Preset | Curve |
 |---|---|
@@ -126,10 +126,11 @@ type SpringTransitionOptions =
 | `easeOut` | `(0, 0, 0.58, 1)` |
 | `easeInOut` | `(0.42, 0, 0.58, 1)` |
 
-- **`cubicBezier(x1, y1, x2, y2)`** and **`steps(count, position?)`** return the same tuples, `[count]` or `[count, position]`. Helpers exist here because these descriptors are positional tuples. Transitions have named keys, so they need none.
-- **`resolveEasing`** gives the `EasingFunction`. Presets are shared instances. Invalid descriptors throw a `RangeError` when they're resolved, which is when the timing is made.
+- **`cubicBezier(x1, y1, x2, y2)`** and **`steps(count, position?)`** return the same tuples, `[count]` or `[count, position]`. Helpers exist here because these params are positional tuples. Transitions have named keys, so they need none.
+- **`checkEasingSpecifier`** throws unless the specifier is a preset (a `TypeError` otherwise), or params of the right length for one of the classes, whose own static `check` it then calls: `CubicBezierEasing.check` (finite control points, `x1` and `x2` within 0–1) and `StepsEasing.check` (a known position, and the count above). The class constructors call the same `check`. Transitions and staggers check their easing as they're made.
+- **`resolveEasing`** gives the `Easing`. Presets are shared instances, and `linear` is exported for the code that needs the linear easing itself.
 
-**Easing functions.** An `EasingFunction` is pure math over its input time, from 0 to 1, limited to a **window** from `windowStart` to `windowEnd`. It's exported as a type, and reachable as `AnimationTiming.easing`.
+**Easings** (`src/easing.ts`). An `Easing` is pure math over its input time, from 0 to 1, limited to a **window** from `windowStart` to `windowEnd`. It's exported as a type.
 
 | Member | Meaning |
 |---|---|
@@ -148,8 +149,8 @@ type SpringTransitionOptions =
 | Class | Progress at input *u* | Turns back at | Also |
 |---|---|---|---|
 | `LinearEasing` | *u* | never | `linear` is the shared instance |
-| `CubicBezierEasing` | y at the curve parameter where x = *u* | x at y's turning parameters | `definition`, `curve` (`src/cubic-bezier.ts`) |
-| `StepsEasing` | `clamp(floor(u·count) + startJump, 0, jumps) / jumps` | never | `jumpOffsets()`, the offsets strictly inside the window where it jumps |
+| `CubicBezierEasing` | y at the curve parameter where x = *u* | x at y's turning parameters | `params`, `curve` (`src/cubic-bezier.ts`), static `check` |
+| `StepsEasing` | `clamp(floor(u·count) + startJump, 0, jumps) / jumps` | never | `params`, `jumpOffsets()`, the offsets strictly inside the window where it jumps, static `check` |
 | `SpringEasing` | the spring's position at *u*·`duration`, plus the closing gap | turning times / `duration` | `spring`, `duration`, `turningTimes`, `progressAtTime`, `slopeAtTime` |
 
 - **Steps:** `jumps` is `count` for `jumpStart` and `jumpEnd`, `count − 1` for `jumpNone`, and `count + 1` for `jumpBoth`. `startJump` is 1 for `jumpStart` and `jumpBoth`, and 0 otherwise.
@@ -178,7 +179,7 @@ type SequencePlaybackOptions = AnimationPlaybackOptions;
 | `delay` | 0 | A finite number, or a stagger. Negative becomes 0. |
 | `repeat` | 0 | A number, and may be `Infinity`. Negative becomes 0, and fractions round down. |
 | `repeatDelay` | 0 | A finite number. Negative becomes 0. |
-| `repeatMode` | `'loop'` | |
+| `repeatMode` | `'loop'` | One of the modes below. Any other throws a `TypeError`. |
 
 | Mode | Every other play |
 |---|---|
@@ -195,13 +196,17 @@ type SequencePlaybackOptions = AnimationPlaybackOptions;
 ```ts
 type Stagger = (index: number, total: number) => Seconds;
 
-type StaggerOptions = ({step: Seconds; spread?: never} | {spread: Seconds; step?: never}) & {
-    startDelay?: Seconds;                   // 0 by default
-    from?: 'first' | 'last' | 'center' | number;
-    easing?: EasingDescriptor;
-};
+type StaggerSpacing = {step: Seconds; spread?: never} | {spread: Seconds; step?: never};
+type StaggerOrigin = 'first' | 'last' | 'center' | number;
 
-function stagger(options: StaggerOptions): Stagger;
+interface StaggerOptions {
+    startDelay?: Seconds;                   // 0 by default
+    from?: StaggerOrigin;
+    easing?: EasingSpecifier;
+}
+
+function stagger(step: Seconds, options?: StaggerOptions): Stagger;
+function stagger(options: StaggerSpacing & StaggerOptions): Stagger;
 ```
 
 A stagger is a `delay` given as a function of each element's index (`src/stagger.ts`). It's a timing decision, so it belongs in the timing. Only playing says how many elements there are, so delays are resolved at adaptation.
@@ -219,10 +224,11 @@ A stagger is a `delay` given as a function of each element's index (`src/stagger
 | `spread` | distance / farthest × `spread` |
 | `spread`, `easing` | easing(distance / farthest) × `spread` |
 
+- **A number** as the first argument is the `step`, so `stagger(0.05, {from: 'center'})` is `stagger({step: 0.05, from: 'center'})`. `spread` only goes by name.
 - **`startDelay`** is the origin's delay, added to every element's.
 - With `spread`, the farthest element waits exactly `startDelay + spread`. With `from: 'center'`, both edges do.
 - With `easing` or `spread`, a farthest distance of 0 gives `startDelay`.
-- **Validation:** exactly one of `step` and `spread`, and `step`, `spread`, `startDelay` and a number `from` must be finite.
+- **Validation:** exactly one of `step` and `spread`, and `step`, `spread`, `startDelay` and a number `from` must be finite. The easing goes through `checkEasingSpecifier`.
 - **The names** say what each one is: `step` is the time between neighbours, `spread` the time the delays spread over. GSAP calls them `each` and `amount`, and Motion calls `startDelay` the same.
 - **Resolved delays:** negative ones become 0, and NaN or infinite ones throw.
 - **Any `Stagger` function** works where a stagger does.
@@ -232,22 +238,21 @@ A stagger is a `delay` given as a function of each element's index (`src/stagger
 ```ts
 class AnimationTiming {
     private constructor(transition: TransitionOptions, options?: AnimationPlaybackOptions);
-    static of(timing: AnimationTimingDescriptor): AnimationTiming;
+    static of(timing: AnimationTimingOptions): AnimationTiming;
     static of(transition: TransitionOptions, options?: AnimationPlaybackOptions): AnimationTiming;
 
     readonly transition: TransitionOptions;
     readonly options: AnimationPlaybackOptions;  // clamped
-    readonly duration: Seconds;                  // one play
-    readonly easing: EasingFunction;
 }
 
-type AnimationTimingDescriptor = TransitionOptions & AnimationPlaybackOptions;
+type AnimationTimingOptions = TransitionOptions & AnimationPlaybackOptions;
 ```
 
 - **One play through the transition,** with its delay and repeats (`src/animation.ts`).
-- **`of` is the only way to make one.** The constructor is private, and validates the transition and options, clamps the options, and resolves the transition once, so every adapter shares the same math.
-- **A descriptor** is a transition with the options spread into it. `of` splits its first argument by key into the transition options and the playback options (`delay`, `repeat`, `repeatDelay`, `repeatMode`), and the `options` given override the ones split out. The two key sets never overlap, so a transition on its own splits into itself, and both overloads share one implementation.
-- **Wherever a timing is taken,** an `AnimationTiming` is used as it is, and a descriptor goes through `of` there.
+- **`of` is the only way to make one.** The constructor is private, and validates the transition and options, and clamps the options.
+- **A timing validates and stores.** It keeps the transition as given and never resolves it: its duration and easing come from `resolveTransition` (§2.2).
+- **`AnimationTimingOptions`** is a transition with the playback options spread into it. `of` splits its first argument by key into the transition options and the playback options (`delay`, `repeat`, `repeatDelay`, `repeatMode`), and the `options` given override the ones split out. The two key sets never overlap, so a transition on its own splits into itself, and both overloads share one implementation.
+- **Wherever a timing is taken,** an `AnimationTiming` is used as it is, and `AnimationTimingOptions` go through `of` there.
 - **Timings have no name.** They get one when they're placed in a sequence, so the same timing can be placed many times.
 - **There's no superclass.** Each timing class validates its own options.
 - **`TimedTweenTiming`** is pending and internal (`@internal`, stripped from the build): tweens that run one after another, each with its own transition, delay and finite repeats. Sequences can't hold it yet, and nothing plays it.
@@ -260,9 +265,9 @@ class SequenceTiming {
 }
 
 class SequenceTimingBuilder<SE extends SequenceTimingEntries = {}> {
-    add<N extends string>(name: N, timing: AnimationTiming | AnimationTimingDescriptor, at?: At<keyof SE & string>)
+    add<N extends string>(timing: AnimationTiming | AnimationTimingOptions, name: N, at?: At<keyof SE & string>)
         : SequenceTimingBuilder<SE & { [_ in N]: AnimationTimingEntry }>;
-    add<N extends string, NS extends SequenceTiming>(name: N, sequence: NS, at?: At<keyof SE & string>)
+    add<N extends string, NS extends SequenceTiming>(sequence: NS, name: N, at?: At<keyof SE & string>)
         : SequenceTimingBuilder<SE & { [_ in N]: SubsequenceTimingEntry<NS> }>;
     build(options?: SequencePlaybackOptions): SequenceTiming<SE>;
 }
@@ -271,11 +276,11 @@ class SequenceTimingBuilder<SE extends SequenceTimingEntries = {}> {
 A sequence timing lays named timings out in time, without targets or values (`src/sequence.ts`).
 
 - **Names** are required, because a mapping refers to entries by name (§3.6). They're unique within their sequence, and can only contain letters, digits and underscores. So they can't contain `>`, and entry paths can't collide.
-- **The builder is the only validator.** `add` checks the name (`checkNewName`), parses the position and checks it against the names so far (`checkPositionDescriptor`, `src/at.ts`), and makes a descriptor into an `AnimationTiming`, so all of these throw at the `add` that wrote them. `build` checks and clamps the options as an animation timing's, and throws for a sequence without entries.
+- **The builder is the only validator.** `add` checks the name (`checkNewName`), parses the position and checks it against the names so far (`checkPositionDescriptor`, `src/at.ts`), and makes `AnimationTimingOptions` into an `AnimationTiming`, so all of these throw at the `add` that wrote them. `build` checks and clamps the options as an animation timing's, and throws for a sequence without entries.
 - **Private constructors.** `SequenceTiming` and `SequenceTimingBuilder` have private constructors that throw unless they're passed a license symbol private to `src/sequence.ts`. `SequenceTiming.builder()` is the only way in, so a `SequenceTiming` is always one a builder checked, and its constructor checks nothing.
 - **Builders are immutable.** `add` returns a new builder with its own copy of the entries, so branches never share entries.
 - **Entries** are kept in order as `names`, with `entries` keyed by name. Each is `{timing, position}` (`AnimationTimingEntry`) or `{sequence, position}` (`SubsequenceTimingEntry`), where `position` is the parsed `PositionDescriptor`. The builder's and the timing's type parameter is the entries' type, so a mapping's type can mirror the tree (§3.6), and `At` takes its names.
-- **Nesting.** A nested sequence is one unit on the outer timeline. Its entries' positions only place them within it.
+- **Nesting.** A subsequence is one unit on the outer timeline. Its entries' positions only place them within it.
 
 #### 2.7.1 Positions
 
@@ -359,14 +364,14 @@ Times are local to the iteration of the sequence an entry is in.
 | **Everything so far** | From 0 to the latest last referenceable end among the earlier entries, or 0 with none. |
 
 - A position that resolves below 0 becomes 0.
-- References never reach into nested sequences.
+- References never reach into subsequences.
 
 #### 2.7.3 Staggered sequences
 
 A sequence whose `delay` is a stagger plays once per element index. The copy at index *i* plays element *i* of each of its animations, so every animation inside must have the same number of elements, *n*, or playing throws.
 
 - Each copy's delay is the stagger at (*i*, *n*), and its positions resolve within that copy.
-- A stagger inside the copy, on an animation or a nested sequence, gives it its delay at (*i*, *n*), as it would one element. That pushes on the entry in that copy only.
+- A stagger inside the copy, on an animation or a subsequence, gives it its delay at (*i*, *n*), as it would one element. That pushes on the entry in that copy only.
 - From outside, the staggered sequence's first start is its earliest copy's, and its ends are its latest copy's.
 
 #### 2.7.4 Repeats in sequences
@@ -395,7 +400,7 @@ A sequence whose `delay` is a stagger plays once per element index. The copy at 
 function animation<Values extends AnimationValues>(
     target: Target,
     values: Values,
-    timing: AnimationTiming | AnimationTimingDescriptor | PropertyTimings<Values>
+    timing: AnimationTiming | AnimationTimingOptions | PropertyTimings<Values>
 ): AnimationDefinition;
 ```
 
@@ -406,7 +411,7 @@ function animation<Values extends AnimationValues>(
 
 **Telling the timing forms apart,** in order:
 1. An `AnimationTiming` instance.
-2. A descriptor: it has a transition key (`duration`, `visualDuration`, `stiffness` or `damping`) whose value is a number.
+2. `AnimationTimingOptions`: it has a transition key (`duration`, `visualDuration`, `stiffness` or `damping`) whose value is a number.
 3. Otherwise, a `PropertyTimings` record. Its values are timings, which are objects, so a property that happens to share a transition key's name isn't mistaken for one.
 
 ### 3.3 Targets
@@ -450,12 +455,12 @@ type AnimationValues = { [property: string]: ValueStops };
 
 ```ts
 type PropertyTimings<Values extends AnimationValues> = {
-    [Property in keyof Values]: AnimationTiming | AnimationTimingDescriptor;
+    [Property in keyof Values]: AnimationTiming | AnimationTimingOptions;
 };
 ```
 
 - **Every property** in `values` needs a timing, and no other key is allowed. The type requires it, and the runtime throws for a missing or extra key.
-- **Under the hood** (`propertySplitOf`, `src/definitions.ts`), it's a nested sequence with one entry per property, named `a`, `b`, … in the values' order, all starting together (`'<'`), on the same target. Its mapping node has `splitsProperties: true`.
+- **Under the hood** (`propertySplitOf`, `src/definitions.ts`), it's a subsequence with one entry per property, named `a`, `b`, … in the values' order, all starting together (`'<'`), on the same target. Its mapping node has `splitsProperties: true`.
 - **Animation `id`s** leave out the level this split adds, so they read as the definition's own path and the property.
 - It works for inline sequence entries too.
 
@@ -478,7 +483,7 @@ class SequenceDefinitionBuilder<Names extends string = never> {
     add<Values extends AnimationValues, N extends string = never>(
         target: Target,
         values: Values,
-        timing: AnimationTiming | AnimationTimingDescriptor | PropertyTimings<Values>,
+        timing: AnimationTiming | AnimationTimingOptions | PropertyTimings<Values>,
         placement?: EntryPlacementOptions<N, Names>
     ): SequenceDefinitionBuilder<Names | N>;
 
@@ -517,7 +522,7 @@ type SequenceMapping<Timing extends SequenceTiming> = {
 };
 ```
 
-- The mapping mirrors the timing's tree, keyed by entry name, with a nested mapping for each nested sequence timing.
+- The mapping mirrors the timing's tree, keyed by entry name, with a nested mapping for each subsequence timing.
 - Every entry must be mapped. The type requires it, and `sequence()` throws `No mapping present for "<path>".` An animation entry's mapping without a target or values throws too, and its values are checked as `animation()`'s.
 - It returns a `SequenceDefinition`, the same as `build()`, so it can be played or added to another sequence.
 
@@ -580,9 +585,9 @@ definition.play(options?: PlayOptions): AnimationControls;
 | Definitions and controls (types) | `AnimationDefinition`, `SequenceDefinition`, `Definition`, `SequenceDefinitionBuilder`, `SequenceTimingBuilder`, `AnimationControls`, `PlayOptions` |
 | Targets and values | `Target`, `CSSSelector`, `CSSValue`, `ValueStops`, `AnimationValues`, `PropertyTimings` |
 | Placement and mappings | `EntryPlacementOptions`, `AnimationMapping`, `SequenceMapping` |
-| Timing | `AnimationTimingDescriptor`, `AnimationPlaybackOptions`, `SequencePlaybackOptions`, `RepeatOptions`, `RepeatMode`, `Stagger`, `StaggerOptions`, `At` |
+| Timing | `AnimationTimingOptions`, `AnimationPlaybackOptions`, `SequencePlaybackOptions`, `RepeatOptions`, `RepeatMode`, `Stagger`, `StaggerSpacing`, `StaggerOptions`, `StaggerOrigin`, `At`, `SequenceTimingEntries` |
 | Transitions | `TransitionOptions`, `EasedTransitionOptions`, `SpringTransitionOptions`, `DurationSpringTransitionOptions`, `VisualSpringTransitionOptions`, `PhysicalSpringTransitionOptions` |
-| Easings | `EasingDescriptor`, `CubicBezierEasingDescriptor`, `StepsEasingDescriptor`, `StepPosition`, `EasingFunction` |
+| Easings | `EasingSpecifier`, `EasingPreset`, `CubicBezierEasingParams`, `StepsEasingParams`, `StepPosition`, `Easing` |
 | Units | `Seconds`, `Progress` |
 
 ### 3.11 Errors
@@ -591,8 +596,8 @@ Every error has the type of what went wrong:
 
 | Type | Thrown for | Examples |
 |---|---|---|
-| `RangeError` | A number out of range | a negative duration, `NaN` or an infinite time, a `bounce` outside −1–1, a value key outside 0–1, a steps count below 1 |
-| `TypeError` | An input of the wrong shape or kind | a transition missing a required key or mixing kinds, `step` with `spread`, no values or a `null` between the ends, a missing or extra property timing, a missing mapping entry, a value the property doesn't take, a constructor called outside its builder |
+| `RangeError` | A number out of range | a negative duration, `NaN` or an infinite time, a `bounce` outside −1–1, a value key outside 0–1, a steps count below 1, a cubic Bézier `x` outside 0–1 |
+| `TypeError` | An input of the wrong shape or kind | a transition missing a required key or mixing kinds, an easing that isn't a preset or params, an unknown `repeatMode`, `step` with `spread`, no values or a `null` between the ends, a missing or extra property timing, a missing mapping entry, a value the property doesn't take, a constructor called outside its builder |
 | `SyntaxError` | A position that doesn't parse | `'<0.2'`, `'+=1'`, `'<+1-1'` |
 | `Error` | Anything else | a duplicate or invalid name, a reference to a later entry, an empty sequence, a target with no elements, values that end up in different units, element counts that differ in a staggered sequence |
 
@@ -602,13 +607,14 @@ Every error has the type of what went wrong:
 |---|---|
 | `src/types.ts` | Units: `Seconds` and `Progress` |
 | `src/constants.ts` | `PRECISION`: how close two progresses must be to count as the same |
-| `src/easing.ts` | Easing descriptors and the windowed easing functions |
+| `src/easing-specifier.ts` | Easing specifiers and their params, `cubicBezier`, `steps`, the presets and `linear`, `checkEasingSpecifier` and `resolveEasing` |
+| `src/easing.ts` | The windowed easing classes, and the checks of their params |
 | `src/cubic-bezier.ts` | Cubic Bézier math: coordinates, inverses, turning points, inflections, splitting |
 | `src/damped-spring.ts` | Closed-form damped springs in each damping regime: positions, turning times, rest time, and the factories each spring kind is made with: `physical`, `visual`, and `restingAt`, which solves a spring that comes to rest at a duration |
-| `src/transition.ts` | Transition options: their kinds, their keys, telling them apart, checking them, and resolving them into a duration and an easing function |
+| `src/transition.ts` | Transition options: their kinds, their keys, telling them apart, checking them, and resolving each one, once, into a duration and an easing |
 | `src/playback-options.ts` | `AnimationPlaybackOptions`, `SequencePlaybackOptions`, `RepeatOptions`, `RepeatMode` and `Stagger`, their checks and their clamps |
-| `src/stagger.ts` | `stagger` and `StaggerOptions` |
-| `src/animation.ts` | `AnimationTiming`, `AnimationTimingDescriptor` and `TimedTweenTiming`, with validation and clamping |
+| `src/stagger.ts` | `stagger`, `StaggerSpacing`, `StaggerOptions` and `StaggerOrigin` |
+| `src/animation.ts` | `AnimationTiming`, `AnimationTimingOptions` and `TimedTweenTiming`, with validation and clamping |
 | `src/at.ts` | `At`, `PositionDescriptor`, `parsePositionDescriptor`, `checkPositionDescriptor` and `resolvePosition` |
 | `src/sequence.ts` | `SequenceTimingBuilder`, `SequenceTiming` and its entries, with validation and clamping |
 | `src/definitions.ts` | `animation`, `sequence`, `AnimationDefinition`, `SequenceDefinition`, `SequenceDefinitionBuilder`, and splitting timings per property |
@@ -678,6 +684,7 @@ Each stop holds a `StopValue`: its text, or none for a missing 0, and later its 
 | `end` | Undefined when it never ends |
 | `lastReferenceableEnd` | See §2.7.2 |
 | `playDuration` | One play of an animation, or one iteration of a sequence |
+| `easing` | An animation's only: the easing its transition resolves to (§2.2) |
 | `totalDuration` | Plays and repeat delays without the delay; infinite when it never ends |
 
 Leaves also keep `elements`: each element's index and start, its position plus its delay. Inside a staggered sequence's copy, a leaf has only the element at the copy's index. A staggered sequence keeps a `SequenceLayout` per copy as `lanes`, and its own reach: `firstStart`, `end` and `lastReferenceableEnd`. A sequence never ends if it repeats forever or if any of its entries never ends.
@@ -784,8 +791,8 @@ For each target, property and effect, in order, the adapter calls `element.anima
 | Definitions are value-free; every change is 0→1 | One definition serves any properties, targets and engine |
 | Duration lives in the transition | A physical spring's duration comes from its physics |
 | Spring quantities are in progress units | Values don't exist at definition time, and spring motion scales linearly |
-| Definitions resolve their easing on creation | Mistakes throw where they're made, and every adapter shares the math |
-| Easing functions are windowed and keep raw progress | Splitting, cutting and reversing are all window operations, and a spring window can start and end at the same progress |
+| Timings validate and store; the layout resolves each transition, once | Resolving isn't a timing's job. The checks still throw where mistakes are made, and every play of a timing shares one easing |
+| Easings are windowed and keep raw progress | Splitting, cutting and reversing are all window operations, and a spring window can start and end at the same progress |
 | Easing math in the core, WAAPI conversion in the adapter | Spline fitting, CSS pieces and `linear()` are engine concerns |
 | Mirror flips the progress and keeps the easing | That's what makes a mirrored spring settle the way it started |
 | Animations are unnamed; entries are named | The same animation can be placed many times |
@@ -816,7 +823,7 @@ It compares the result with the definitions' own math, sampled at times that mis
 
 The cases cover single animations, sequence loops, reverses and mirrors with offset entries, and inner repeats baked inside outer ones. Easings are cubic Bézier (including overshoot), jump-start and jump-end steps, and springs. Layout, timing, fill and drop cases are checked exactly.
 
-`tests/animation.test.ts` covers timings: validation and clamping, telling transition kinds apart, splitting descriptors, the `DampedSpring` factories, and staggers. `tests/sequence.test.ts` covers positions (parsing, one offset of each kind in order, and resolving every reference and share), sequence timings, targets, value forms, and definitions: naming, immutability, property splits and mapping trees.
+`tests/animation.test.ts` covers timings: validation and clamping, telling transition kinds apart, splitting `AnimationTimingOptions`, the `DampedSpring` factories, and staggers. `tests/sequence.test.ts` covers positions (parsing, one offset of each kind in order, and resolving every reference and share), sequence timings, targets, value forms, and definitions: naming, immutability, property splits and mapping trees.
 
 Effect chains are tested through a stand-in `CSSValueResolver` that takes plain numbers and gives every property a current value of 0.25. The tests run without a DOM. `tests/play.test.ts` plays definitions on a stand-in one and checks the animations' ids and staggered delays, but `domValueResolver`, probes and real elements have no tests yet.
 

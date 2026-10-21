@@ -1,4 +1,4 @@
-import {AnimationTiming, type AnimationTimingDescriptor} from "./animation.ts";
+import {AnimationTiming, type AnimationTimingOptions} from "./animation.ts";
 import type {At} from "./at.ts";
 import {SequenceTiming, type SequenceTimingBuilder, type SequenceTimingEntries} from "./sequence.ts";
 import type {SequencePlaybackOptions} from "./playback-options.ts";
@@ -8,7 +8,7 @@ import {type AnimationMapping, type AnimationValues, type MappingTree, type Sequ
 
 /** A timing for each property of the values. */
 export type PropertyTimings<Values extends AnimationValues> = {
-    [Property in keyof Values]: AnimationTiming | AnimationTimingDescriptor;
+    [Property in keyof Values]: AnimationTiming | AnimationTimingOptions;
 };
 
 /** Where an entry goes in a sequence: the name later positions refer to it by, and when it starts. */
@@ -24,13 +24,13 @@ type MappedTiming =
     | { timing: AnimationTiming; mapping: AnimationMapping }
     | { timing: SequenceTiming; mapping: SequenceMappingNode };
 
-export function animation(target: Target, values: AnimationValues, timing: AnimationTiming | AnimationTimingDescriptor): AnimationDefinition;
+export function animation(target: Target, values: AnimationValues, timing: AnimationTiming | AnimationTimingOptions): AnimationDefinition;
 export function animation<Values extends AnimationValues>(target: Target, values: Values, timing: PropertyTimings<Values>): AnimationDefinition;
 /** Defines one animation: which elements, which values, and how it moves through them. */
 export function animation<Values extends AnimationValues>(
     target: Target,
     values: Values,
-    timing: AnimationTiming | AnimationTimingDescriptor | PropertyTimings<Values>
+    timing: AnimationTiming | AnimationTimingOptions | PropertyTimings<Values>
 ): AnimationDefinition {
     return new AnimationDefinition(target, values, timing);
 }
@@ -52,7 +52,7 @@ export class AnimationDefinition {
     constructor(
         target: Target,
         values: AnimationValues,
-        timing: AnimationTiming | AnimationTimingDescriptor | PropertyTimings<AnimationValues>
+        timing: AnimationTiming | AnimationTimingOptions | PropertyTimings<AnimationValues>
     ) {
         const mapping: AnimationMapping = {target, values};
         if (!isPropertyTimings(timing)) {
@@ -103,7 +103,7 @@ interface PendingEntry {
 type InlineEntryArgs = [
     target: Target,
     values: AnimationValues,
-    timing: AnimationTiming | AnimationTimingDescriptor | PropertyTimings<AnimationValues>,
+    timing: AnimationTiming | AnimationTimingOptions | PropertyTimings<AnimationValues>,
     placement?: EntryPlacementOptions<string, string>
 ];
 type DefinitionEntryArgs = [definition: Definition, placement?: EntryPlacementOptions<string, string>];
@@ -116,7 +116,7 @@ export class SequenceDefinitionBuilder<Names extends string = never> {
     add<Values extends AnimationValues, N extends string = never>(
         target: Target,
         values: Values,
-        timing: AnimationTiming | AnimationTimingDescriptor | PropertyTimings<Values>,
+        timing: AnimationTiming | AnimationTimingOptions | PropertyTimings<Values>,
         placement?: EntryPlacementOptions<N, Names>
     ): SequenceDefinitionBuilder<Names | N>;
     add<N extends string = never>(
@@ -144,8 +144,8 @@ export class SequenceDefinitionBuilder<Names extends string = never> {
             const name = givenName ?? nextUnnamedName();
             const {mappedTiming} = definition;
             builder = mappedTiming.timing instanceof SequenceTiming
-                ? builder.add(name, mappedTiming.timing, at)
-                : builder.add(name, mappedTiming.timing, at);
+                ? builder.add(mappedTiming.timing, name, at)
+                : builder.add(mappedTiming.timing, name, at);
             mappings[name] = mappedTiming.mapping;
         }
         return new SequenceDefinition({timing: builder.build(options), mapping: {entries: mappings, splitsProperties: false}});
@@ -173,7 +173,7 @@ function inlineEntryOf([target, values, timing, placement = {}]: InlineEntryArgs
 const transitionMarkers = ['duration', 'visualDuration', 'stiffness', 'damping'] as const;
 
 function isPropertyTimings(
-    timing: AnimationTiming | AnimationTimingDescriptor | PropertyTimings<AnimationValues>
+    timing: AnimationTiming | AnimationTimingOptions | PropertyTimings<AnimationValues>
 ): timing is PropertyTimings<AnimationValues> {
     if (timing instanceof AnimationTiming) return false;
     return !transitionMarkers.some(key => typeof (timing as { [key: string]: unknown })[key] === 'number');
@@ -185,7 +185,7 @@ function propertySplitOf(mapping: AnimationMapping, timings: { readonly [propert
     const mappings: { [name: string]: MappingTree } = {};
     Object.entries(timings).forEach(([property, timing], index) => {
         const name = alphabeticNameOf(index);
-        builder = builder.add(name, timing, '<');
+        builder = builder.add(timing, name, '<');
         mappings[name] = {...mapping, values: {[property]: mapping.values[property]!}};
     });
     return {timing: builder.build(), mapping: {entries: mappings, splitsProperties: true}};

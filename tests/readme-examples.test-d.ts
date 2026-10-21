@@ -10,7 +10,7 @@ describe("the README's examples", () => {
         animation('.card', {opacity: [0, 1], scale: [0.95, 1]}, {duration: 0.4, easing: 'easeOut'}).play();
         animation('.dot', {scale: [1, 1.4]}, {
             visualDuration: 0.3, bounce: 0.4,
-            delay: stagger({step: 0.05, from: 'center'}),
+            delay: stagger(0.05, {from: 'center'}),
             repeat: Infinity, repeatMode: 'mirror', repeatDelay: 0.6
         }).play();
         sequence()
@@ -22,7 +22,7 @@ describe("the README's examples", () => {
         const cards = sequence()
             .add('.card', {translate: [40, 0]}, {duration: 0.6, bounce: 0.2}, {name: 'lift'})
             .add('.card .icon', {opacity: [0, 1]}, {duration: 0.3}, {at: 'lift<+25%'})
-            .build({delay: stagger({step: 0.1})});
+            .build({delay: stagger(0.1)});
         cards.play({scope: featuredList});
         cards.play({scope: archiveList});
     });
@@ -48,6 +48,8 @@ describe("the README's examples", () => {
         stagger({spread: 0.4, from: 'center'});
         stagger({step: 0.05, startDelay: 0.2});
         stagger({step: 0.05, from: 'last', easing: 'easeOut'});
+        stagger(0.05);
+        stagger(0.05, {from: 'last', easing: 'easeOut'});
 
         animation('.card', {translate: [40, 0], opacity: [0, 1]}, {
             translate: {duration: 0.6, bounce: 0.2},
@@ -72,7 +74,7 @@ describe("the README's examples", () => {
         sequence()
             .add('.card', {scale: [1, 1.05]}, {duration: 0.3}, {name: 'lift'})
             .add('.card .icon', {opacity: [0, 1]}, {duration: 0.5})
-            .build({delay: stagger({step: 0.1})})
+            .build({delay: stagger(0.1)})
             .play();
 
         const positions = [
@@ -93,9 +95,9 @@ describe("the README's examples", () => {
         animation('.card', {translate: [40, 0]}, rise);
         animation('.panel', {opacity: [0, 1]}, rise);
         const reveal = SequenceTiming.builder()
-            .add('title', rise)
-            .add('subtitle', {duration: 0.4, easing: 'easeOut'}, '-0.3')
-            .add('cta', {stiffness: 300, damping: 20}, 'title<+50%')
+            .add(rise, 'title')
+            .add({duration: 0.4, easing: 'easeOut'}, 'subtitle', '-0.3')
+            .add({stiffness: 300, damping: 20}, 'cta', 'title<+50%')
             .build({repeat: 1, repeatMode: 'reverse'});
         sequence(reveal, {
             title: {target: 'h1', values: {opacity: [0, 1], translate: [-40, 0]}},
@@ -118,10 +120,12 @@ describe("the README's examples", () => {
         sequence().add('h1', {opacity: 1}, timing, {at: '<-1+50%'});
         // @ts-expect-error: every property needs a timing
         animation('.card', {translate: [40, 0], opacity: [0, 1]}, {translate: {duration: 0.6}});
-        const reveal = SequenceTiming.builder().add('title', timing).add('subtitle', timing).build();
+        const reveal = SequenceTiming.builder().add(timing, 'title').add(timing, 'subtitle').build();
         // @ts-expect-error: the mapping names every entry
         sequence(reveal, {title: {target: 'h1', values: {opacity: 1}}});
         // @ts-expect-error: a stagger takes step or spread, not both
         stagger({step: 0.1, spread: 1});
+        // @ts-expect-error: spread is only given by name
+        stagger(0.1, {spread: 1});
     });
 });

@@ -18,11 +18,15 @@ export interface AnimationPlaybackOptions extends RepeatOptions {
 /** A sequence's timing takes the same options as an animation's. */
 export type SequencePlaybackOptions = AnimationPlaybackOptions;
 
-/** Delays and repeat delays must be finite, and the repeat count a number; `label` names the timing in messages. */
+const repeatModes: readonly RepeatMode[] = ['loop', 'reverse', 'mirror'];
+
+/** Delays and repeat delays must be finite, the repeat count a number, and the repeat mode a known one; `label` names the timing in messages. */
 export function checkPlaybackOptions(options: AnimationPlaybackOptions, label: string): void {
     if (typeof options.delay === 'number') checkNumber(options.delay, `${label}'s delay`);
     checkNumber(options.repeatDelay, `${label}'s repeat delay`);
     checkNumber(options.repeat, `${label}'s repeat count`, {allowInfinity: true});
+    if (options.repeatMode !== undefined && !repeatModes.includes(options.repeatMode))
+        throw new TypeError(`${label} repeats as "${options.repeatMode}", which isn't one of ${repeatModes.map(repeatMode => `"${repeatMode}"`).join(', ')}.`);
 }
 
 /** Negative repeat counts and delays become 0, and fractional counts round down. */

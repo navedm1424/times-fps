@@ -1,4 +1,3 @@
-import type {EasingFunction} from "./easing.ts";
 import {
     type AnimationPlaybackOptions,
     checkPlaybackOptions,
@@ -6,35 +5,29 @@ import {
     clampedRepeats,
     type RepeatOptions
 } from "./playback-options.ts";
-import {checkTransitionOptions, isTransitionKey, resolveTransition, type TransitionOptions} from "./transition.ts";
+import {checkTransitionOptions, isTransitionKey, type TransitionOptions} from "./transition.ts";
 import type {Seconds} from "./types.ts";
 import {checkNumber} from "./utils/validation.ts";
 
 /** A transition with the options of its timing spread into it. */
-export type AnimationTimingDescriptor = TransitionOptions & AnimationPlaybackOptions;
+export type AnimationTimingOptions = TransitionOptions & AnimationPlaybackOptions;
 
 /** One play through the transition, with its delay and repeats. */
 export class AnimationTiming {
     readonly options: AnimationPlaybackOptions;
-    /** How long one play lasts. */
-    readonly duration: Seconds;
-    readonly easing: EasingFunction;
 
     private constructor(readonly transition: TransitionOptions, options: AnimationPlaybackOptions = {}) {
         checkPlaybackOptions(options, "The timing");
         checkTransitionOptions(transition, "The timing's transition");
         this.options = clampedDelay(clampedRepeats(options));
-        const {duration, easing} = resolveTransition(transition);
-        this.duration = duration;
-        this.easing = easing;
     }
 
     /** A descriptor is split by key into its transition and its options. */
-    static of(timing: AnimationTimingDescriptor): AnimationTiming;
+    static of(timing: AnimationTimingOptions): AnimationTiming;
     static of(transition: TransitionOptions, options?: AnimationPlaybackOptions): AnimationTiming;
     // static of<T extends string[]>(tweens: { [I in keyof T]: TimedTween<T[I]>; }, options?: AnimationPlaybackOptions): TimedTweenTiming<T>;
     // static of<T extends string[]>(transition: TransitionOptions, tweens: { [I in keyof T]: RatioTween<T[I]>; }, options?: AnimationPlaybackOptions): SelfTimedTiming<T>;
-    static of(transition: TransitionOptions | AnimationTimingDescriptor, options?: AnimationPlaybackOptions): AnimationTiming {
+    static of(transition: TransitionOptions | AnimationTimingOptions, options?: AnimationPlaybackOptions): AnimationTiming {
         const entries = Object.entries(transition).filter(([, value]) => value !== undefined);
         const transitionOptions = Object.fromEntries(entries.filter(([key]) => isTransitionKey(key))) as TransitionOptions;
         const playbackOptions = Object.fromEntries(entries.filter(([key]) => !isTransitionKey(key))) as AnimationPlaybackOptions;

@@ -1,22 +1,9 @@
 import {CubicBezier} from "./cubic-bezier.ts";
 import type {DampedSpring} from "./damped-spring.ts";
+import type {CubicBezierEasingParams, StepPosition, StepsEasingParams} from "./easing-specifier.ts";
 import type {Progress, Seconds} from "./types.ts";
 import {invLerp, lerp, solveMonotone} from "./utils/math.ts";
-
-export type CubicBezierEasingDescriptor = readonly [x1: number, y1: number, x2: number, y2: number];
-export type StepPosition = 'jumpStart' | 'jumpEnd' | 'jumpNone' | 'jumpBoth';
-export type StepsEasingDescriptor = readonly [count: number, position?: StepPosition];
-export type EasingDescriptor = EasingPreset | CubicBezierEasingDescriptor | StepsEasingDescriptor;
-
-/** As in CSS `cubic-bezier()`. */
-export function cubicBezier(x1: number, y1: number, x2: number, y2: number): CubicBezierEasingDescriptor {
-    return [x1, y1, x2, y2];
-}
-
-/** As in CSS `steps()`, jumping at the end unless told otherwise. */
-export function steps(count: number, position?: StepPosition): StepsEasingDescriptor {
-    return position ? [count, position] : [count];
-}
+import {checkNumber} from "./utils/validation.ts";
 
 /** How far outside the window an offset found by solving may land and still count as inside it. */
 const offsetTolerance = 1e-9;
@@ -25,7 +12,7 @@ const offsetTolerance = 1e-9;
  * An easing's progress over its input time, 0–1, within a window of it, which runs backwards when its end comes before its start.
  * Offsets are fractions of the window, and the progress isn't rescaled to it.
  */
-export abstract class EasingFunction {
+export abstract class Easing {
     constructor(readonly windowStart: number = 0, readonly windowEnd: number = 1) {}
 
     protected abstract progressAtInput(input: number): Progress;
@@ -33,7 +20,7 @@ export abstract class EasingFunction {
     protected abstract turningInputs(): number[];
     /** The inputs at which the progress reaches `progress`. */
     protected abstract inputsAt(progress: Progress): number[];
-    protected abstract withWindow(windowStart: number, windowEnd: number): EasingFunction;
+    protected abstract withWindow(windowStart: number, windowEnd: number): Easing;
 
     /** Whether the window is the whole easing, forwards. */
     get isWhole(): boolean {
@@ -81,7 +68,7 @@ export abstract class EasingFunction {
     }
 }
 
-export class LinearEasing extends EasingFunction {
+export class LinearEasing extends Easing {
     protected progressAtInput(input: number): Progress {
         return input;
     }
@@ -100,15 +87,25 @@ export class LinearEasing extends EasingFunction {
 }
 
 /** A CSS `cubic-bezier()`: a curve from (0, 0) to (1, 1) whose time, x, never turns back. */
-export class CubicBezierEasing extends EasingFunction {
+export class CubicBezierEasing extends Easing {
     readonly curve: CubicBezier;
 
-    constructor(readonly definition: CubicBezierEasingDescriptor, windowStart?: number, windowEnd?: number) {
+    constructor(readonly params: CubicBezierEasingParams, windowStart?: number, windowEnd?: number) {
         super(windowStart, windowEnd);
-        const [x1, y1, x2, y2] = definition;
-        if (!(x1 >= 0 && x1 <= 1 && x2 >= 0 && x2 <= 1))
-            throw new RangeError(`A cubic Bézier easing's x control points must be within 0–1, not ${x1} and ${x2}.`);
+        CubicBezierEasing.check(params, "A cubic Bézier easing");
+        const [x1, y1, x2, y2] = params;
         this.curve = new CubicBezier({x: 0, y: 0}, {x: x1, y: y1}, {x: x2, y: y2}, {x: 1, y: 1});
+    }
+
+    /** Every control point must be finite, with `x1` and `x2` within 0–1; `label` names the easing in messages. */
+    static check(params: CubicBezierEasingParams, label: string): void {
+        const [x1, y1, x2, y2] = params;
+        checkNumber(x1, `${label}'s x1`);
+        checkNumber(y1, `${label}'s y1`);
+        checkNumber(x2, `${label}'s x2`);
+        checkNumber(y2, `${label}'s y2`);
+        if (!(x1 >= 0 && x1 <= 1 && x2 >= 0 && x2 <= 1))
+            throw new RangeError(`${label}'s x control points must be within 0–1, not ${x1} and ${x2}.`);
     }
 
     static of(x1: number, y1: number, x2: number, y2: number): CubicBezierEasing {
@@ -128,41 +125,50 @@ export class CubicBezierEasing extends EasingFunction {
     }
 
     protected withWindow(windowStart: number, windowEnd: number): CubicBezierEasing {
-        return new CubicBezierEasing(this.definition, windowStart, windowEnd);
+        return new CubicBezierEasing(this.params, windowStart, windowEnd);
     }
 }
 
+const stepPositions: readonly StepPosition[] = ['jumpStart', 'jumpEnd', 'jumpNone', 'jumpBoth'];
+
 /** A CSS `steps()`: the output only ever rises, in jumps. */
-export class StepsEasing extends EasingFunction {
-    constructor(readonly definition: StepsEasingDescriptor, windowStart?: number, windowEnd?: number) {
+export class StepsEasing extends Easing {
+    constructor(readonly params: StepsEasingParams, windowStart?: number, windowEnd?: number) {
         super(windowStart, windowEnd);
-        const [count, position = 'jumpEnd'] = definition;
+        StepsEasing.check(params, "A steps easing");
+    }
+
+    /** The position must be one CSS has, and the count whole and at least 1, or 2 for `jumpNone`; `label` names the easing in messages. */
+    static check(params: StepsEasingParams, label: string): void {
+        const [count, position = 'jumpEnd'] = params;
+        if (!stepPositions.includes(position))
+            throw new TypeError(`${label} jumps as "${position}", which isn't one of ${stepPositions.map(stepPosition => `"${stepPosition}"`).join(', ')}.`);
         const leastCount = position === 'jumpNone' ? 2 : 1;
         if (!(Number.isInteger(count) && count >= leastCount))
-            throw new RangeError(`A steps easing jumping as "${position}" needs a whole count of at least ${leastCount}, not ${count}.`);
+            throw new RangeError(`${label} jumping as "${position}" needs a whole count of at least ${leastCount}, not ${count}.`);
     }
 
     /** How many times the output jumps over the whole easing, counting the jumps at its ends. */
     private get jumpCount(): number {
-        const [count, position = 'jumpEnd'] = this.definition;
+        const [count, position = 'jumpEnd'] = this.params;
         return {jumpStart: count, jumpEnd: count, jumpNone: count - 1, jumpBoth: count + 1}[position];
     }
 
     /** 1 when the output jumps as the input starts, 0 otherwise. */
     private get startJump(): number {
-        const [, position = 'jumpEnd'] = this.definition;
+        const [, position = 'jumpEnd'] = this.params;
         return position === 'jumpStart' || position === 'jumpBoth' ? 1 : 0;
     }
 
     protected progressAtInput(input: number): Progress {
-        const [count] = this.definition;
+        const [count] = this.params;
         const step = Math.floor(input * count) + this.startJump;
         return Math.min(Math.max(step, 0), this.jumpCount) / this.jumpCount;
     }
 
     /** The output just before the input, where a jump at the input hasn't happened yet. */
     private progressBeforeInput(input: number): Progress {
-        const [count] = this.definition;
+        const [count] = this.params;
         const step = Math.ceil(input * count - offsetTolerance) - 1 + this.startJump;
         return Math.min(Math.max(step, 0), this.jumpCount) / this.jumpCount;
     }
@@ -183,25 +189,25 @@ export class StepsEasing extends EasingFunction {
     /** The input at which the output first reaches the progress. */
     protected inputsAt(progress: Progress): number[] {
         if (!(progress <= 1)) return [];
-        const [count] = this.definition;
+        const [count] = this.params;
         const step = Math.ceil(progress * this.jumpCount - offsetTolerance) - this.startJump;
         return [Math.min(Math.max(step, 0), count) / count];
     }
 
     /** The offsets strictly inside the window at which the output jumps, in order. */
     jumpOffsets(): number[] {
-        const [count] = this.definition;
+        const [count] = this.params;
         const inputs = Array.from({length: count - 1}, (_, index) => (index + 1) / count);
         return this.offsetsOf(inputs).filter(offset => offset > offsetTolerance && offset < 1 - offsetTolerance);
     }
 
     protected withWindow(windowStart: number, windowEnd: number): StepsEasing {
-        return new StepsEasing(this.definition, windowStart, windowEnd);
+        return new StepsEasing(this.params, windowStart, windowEnd);
     }
 }
 
 /** A spring's motion over `duration`, with the gap it leaves there closed evenly after its last turning point, so it ends at 1. */
-export class SpringEasing extends EasingFunction {
+export class SpringEasing extends Easing {
     /** The times at which the spring turns back, in order. */
     readonly turningTimes: readonly Seconds[];
     private readonly closingStart: Seconds;
@@ -250,23 +256,4 @@ export class SpringEasing extends EasingFunction {
     protected withWindow(windowStart: number, windowEnd: number): SpringEasing {
         return new SpringEasing(this.spring, this.duration, windowStart, windowEnd);
     }
-}
-
-export const linear = new LinearEasing();
-
-const easingPresets = {
-    linear,
-    ease: CubicBezierEasing.of(0.25, 0.1, 0.25, 1),
-    easeIn: CubicBezierEasing.of(0.42, 0, 1, 1),
-    easeOut: CubicBezierEasing.of(0, 0, 0.58, 1),
-    easeInOut: CubicBezierEasing.of(0.42, 0, 0.58, 1)
-} as const satisfies {
-    [preset: string]: EasingFunction;
-};
-type EasingPreset = keyof typeof easingPresets;
-
-export function resolveEasing(easing: EasingDescriptor): EasingFunction {
-    if (typeof easing === 'string') return easingPresets[easing];
-    if (easing.length === 4) return new CubicBezierEasing(easing);
-    return new StepsEasing(easing);
 }

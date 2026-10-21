@@ -1,4 +1,4 @@
-import type {CubicBezierEasingDescriptor, StepPosition, StepsEasingDescriptor} from "../easing.ts";
+import type {CubicBezierEasingParams, StepPosition, StepsEasingParams} from "../easing-specifier.ts";
 
 /** A point of a CSS `linear()` easing; two at the same input make a jump. */
 export interface LinearPoint {
@@ -9,8 +9,8 @@ export interface LinearPoint {
 /** An easing WAAPI takes as it is. */
 export type NativeEasing =
     | { type: 'linear' }
-    | { type: 'cubic-bezier'; definition: CubicBezierEasingDescriptor }
-    | { type: 'steps'; definition: StepsEasingDescriptor }
+    | { type: 'cubic-bezier'; definition: CubicBezierEasingParams }
+    | { type: 'steps'; definition: StepsEasingParams }
     | { type: 'linear-points'; points: readonly LinearPoint[] };
 
 const cssStepPositions: { [Position in StepPosition]: string } = {

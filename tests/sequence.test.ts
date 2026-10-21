@@ -65,7 +65,7 @@ describe("resolvePosition", () => {
 });
 
 describe("SequenceTimingBuilder", () => {
-    const builder = () => SequenceTiming.builder().add('a', second);
+    const builder = () => SequenceTiming.builder().add(second, 'a');
 
     it("rejects time fields that aren't finite and a repeat count that isn't a number", () => {
         expect(() => builder().build({delay: Infinity})).toThrow(RangeError);
@@ -79,25 +79,25 @@ describe("SequenceTimingBuilder", () => {
     });
 
     it("takes a transition together with its timing's options", () => {
-        const timing = SequenceTiming.builder().add('a', {duration: 1, delay: 0.5, repeat: 2}).build();
+        const timing = SequenceTiming.builder().add({duration: 1, delay: 0.5, repeat: 2}, 'a').build();
         expect(timing.entries.a.timing.options).toEqual({delay: 0.5, repeat: 2});
-        expect(timing.entries.a.timing.duration).toBe(1);
+        expect(timing.entries.a.timing.transition).toEqual({duration: 1});
     });
 
     it("rejects positions it can't parse, whose time isn't finite, or that refer to a later entry", () => {
-        expect(() => SequenceTiming.builder().add('a', second, 'b>' as '>')).toThrow();
-        expect(() => SequenceTiming.builder().add('a', second, Infinity)).toThrow(RangeError);
-        expect(() => SequenceTiming.builder().add('a', second, '+Infinity' as '+0')).toThrow(RangeError);
+        expect(() => SequenceTiming.builder().add(second, 'a', 'b>' as '>')).toThrow();
+        expect(() => SequenceTiming.builder().add(second, 'a', Infinity)).toThrow(RangeError);
+        expect(() => SequenceTiming.builder().add(second, 'a', '+Infinity' as '+0')).toThrow(RangeError);
     });
 
     it("rejects names used twice or with other characters", () => {
-        expect(() => builder().add('a', second)).toThrow();
-        expect(() => SequenceTiming.builder().add('a-b', second)).toThrow();
+        expect(() => builder().add(second, 'a')).toThrow();
+        expect(() => SequenceTiming.builder().add(second, 'a-b')).toThrow();
     });
 
     it("gives a new builder from every add, so branches don't share entries", () => {
         const trunk = builder();
-        const branch = trunk.add('b', second);
+        const branch = trunk.add(second, 'b');
         expect(trunk.build().names).toEqual(['a']);
         expect(branch.build().names).toEqual(['a', 'b']);
         expect(() => SequenceTiming.builder().build()).toThrow();
@@ -119,25 +119,25 @@ describe("positions", () => {
 
     it("places entries after the end of everything so far", () => {
         const timing = SequenceTiming.builder()
-            .add('a', AnimationTiming.of({duration: 2}))
-            .add('b', second, 0)
-            .add('c', second, '>>+0.5')
+            .add(AnimationTiming.of({duration: 2}), 'a')
+            .add(second, 'b', 0)
+            .add(second, 'c', '>>+0.5')
             .build();
         expect(startsOf(timing, ['a', 'b', 'c'])).toEqual({a: 0, b: 0, c: 2.5});
     });
 
     it("measures shares of the referenced entry, of everything so far, and of the inserted entry", () => {
         const timing = SequenceTiming.builder()
-            .add('a', AnimationTiming.of({duration: 2}, {repeat: 1}))
-            .add('b', second, 'a<+25%')
-            .add('c', AnimationTiming.of({duration: 2}), '-=25%')
-            .add('d', second, '>>-25%')
+            .add(AnimationTiming.of({duration: 2}, {repeat: 1}), 'a')
+            .add(second, 'b', 'a<+25%')
+            .add(AnimationTiming.of({duration: 2}), 'c', '-=25%')
+            .add(second, 'd', '>>-25%')
             .build();
         expect(startsOf(timing, ['a', 'b', 'c', 'd'])).toEqual({a: 0, b: 1, c: 1.5, d: 3});
     });
 
     it("starts the first entry from the start of the sequence, and clamps positions before it", () => {
-        const timing = SequenceTiming.builder().add('a', second, '-50%').add('b', second, '<-1').build();
+        const timing = SequenceTiming.builder().add(second, 'a', '-50%').add(second, 'b', '<-1').build();
         expect(startsOf(timing, ['a', 'b'])).toEqual({a: 0, b: 0});
     });
 });
@@ -258,8 +258,8 @@ describe("sequence", () => {
     });
 
     it("binds a sequence timing to a mapping of the same shape", () => {
-        const inner = SequenceTiming.builder().add('glow', fade).build();
-        const timing = SequenceTiming.builder().add('title', fade).add('card', inner).build();
+        const inner = SequenceTiming.builder().add(fade, 'glow').build();
+        const timing = SequenceTiming.builder().add(fade, 'title').add(inner, 'card').build();
         const definition = sequence(timing, {
             title: {target: 'h1', values: {opacity: [0, 1]}},
             card: {glow: {target: '.card', values: {opacity: [0, 1]}}}

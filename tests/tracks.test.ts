@@ -1,11 +1,12 @@
 import {describe, expect, it} from "vitest";
 import {AnimationTiming} from "../src/animation.ts";
-import {CubicBezierEasing, type EasingFunction, linear, StepsEasing} from "../src/easing.ts";
+import {CubicBezierEasing, type Easing, StepsEasing} from "../src/easing.ts";
+import {linear, resolveEasing} from "../src/easing-specifier.ts";
 import {PropertyStops, type NumericValueStops} from "../src/resolution/stops.ts";
 import {layoutOf, type EntryPath, type SequenceLayout} from "../src/resolution/layout.ts";
 import {SequenceTiming} from "../src/sequence.ts";
 import type {AnimationPlaybackOptions, RepeatOptions} from "../src/playback-options.ts";
-import type {TransitionOptions} from "../src/transition.ts";
+import {resolveTransition, type TransitionOptions} from "../src/transition.ts";
 import {lerp} from "../src/utils/math.ts";
 import type {NativeAnimationEffect, NativeKeyframe} from "../src/waapi/native-effects.ts";
 import {cssEasingOf, type NativeEasing} from "../src/waapi/native-easing.ts";
@@ -120,14 +121,14 @@ function trackValueAt(effects: readonly NativeAnimationEffect[], time: number): 
 }
 
 /** The easing's progress at `x`, with its start and end values at its edges. */
-function easedProgressAt(easing: EasingFunction, x: number): number {
+function easedProgressAt(easing: Easing, x: number): number {
     if (x <= 0) return easing.startProgress;
     if (x >= 1) return easing.endProgress;
     return easing.progressAt(x);
 }
 
 /** What the definition means at `time`: each play through the stops, held through the repeat delays and after the last play. */
-function definedValueAt(easing: EasingFunction, stops: PropertyStops, playDuration: number, options: RepeatOptions, time: number): number {
+function definedValueAt(easing: Easing, stops: PropertyStops, playDuration: number, options: RepeatOptions, time: number): number {
     const {repeat: repeatCount = 0, repeatDelay = 0, repeatMode = 'loop'} = options;
     const iteration = Math.min(Math.floor(time / (playDuration + repeatDelay)), repeatCount);
     const x = Math.min((time - iteration * (playDuration + repeatDelay)) / playDuration, 1);
@@ -151,9 +152,9 @@ describe("layoutOf", () => {
 
     it("places entries in their sequence's iteration and repeats the iteration", () => {
         const sequence = SequenceTiming.builder()
-            .add('a', AnimationTiming.of({duration: 1}))
-            .add('b', AnimationTiming.of({duration: 2}, {delay: 0.25}), '+0.5')
-            .add('c', AnimationTiming.of({duration: 1}), 'b<+0')
+            .add(AnimationTiming.of({duration: 1}), 'a')
+            .add(AnimationTiming.of({duration: 2}, {delay: 0.25}), 'b', '+0.5')
+            .add(AnimationTiming.of({duration: 1}), 'c', 'b<+0')
             .build({delay: 1, repeat: 1, repeatDelay: 0.5});
         const layout = layoutOf(sequence, new Map([['a', 1], ['b', 1], ['c', 1]])) as SequenceLayout;
         expect(layout.entries.get('b')).toMatchObject({firstStart: 1.75, end: 3.75, lastReferenceableEnd: 3.75});
@@ -163,7 +164,7 @@ describe("layoutOf", () => {
 
     it("leaves a sequence with an infinite entry without an end", () => {
         const sequence = SequenceTiming.builder()
-            .add('a', AnimationTiming.of({duration: 1}, {repeat: Infinity}))
+            .add(AnimationTiming.of({duration: 1}, {repeat: Infinity}), 'a')
             .build({repeat: 1});
         expect(layoutOf(sequence, new Map([['a', 1]]))).toMatchObject({playDuration: 1, end: undefined, totalDuration: Infinity, lastReferenceableEnd: 2});
     });
@@ -295,8 +296,9 @@ describe("AnimationTracksResolver values", () => {
         it(`follows ${name} through every repeat`, () => {
             for (const options of repeatings) {
                 const animation = AnimationTiming.of(transition, options);
+                const {duration, easing} = resolveTransition(animation.transition);
                 const effects = animationTracksOf(animation, valuesWithStop).get(element)!.x!;
-                const definedAt = (time: number) => definedValueAt(animation.easing, stopsWithStop, animation.duration, options, time);
+                const definedAt = (time: number) => definedValueAt(easing, stopsWithStop, duration, options, time);
                 expectTrackToFollow(effects, definedAt, tolerance, 10, JSON.stringify(options));
             }
         });
@@ -312,14 +314,15 @@ describe("AnimationTracksResolver sequence values", () => {
             const entryRepeat = {repeat: 1, repeatDelay: 0.25, repeatMode: 'reverse'} as const;
             for (const repeatMode of ['loop', 'reverse'] as const) {
                 const animation = AnimationTiming.of(transition, entryRepeat);
+                const {duration, easing} = resolveTransition(animation.transition);
                 const sequence = SequenceTiming.builder()
-                    .add('a', animation, position)
-                    .add('b', AnimationTiming.of({duration: 1.5}), 0)
+                    .add(animation, 'a', position)
+                    .add(AnimationTiming.of({duration: 1.5}), 'b', 0)
                     .build({...sequenceRepeat, repeatMode});
                 const effects = sequenceTracksOf(sequence, {a: valuesWithStop, b: {y: line.x}}).get(element)!.x!;
-                const iterationDuration = position + 2 * animation.duration + entryRepeat.repeatDelay;
+                const iterationDuration = position + 2 * duration + entryRepeat.repeatDelay;
                 const entryValueAt = (time: number) =>
-                    definedValueAt(animation.easing, stopsWithStop, animation.duration, entryRepeat, Math.max(time - position, 0));
+                    definedValueAt(easing, stopsWithStop, duration, entryRepeat, Math.max(time - position, 0));
                 const definedAt = (time: number) => {
                     const iteration = Math.min(Math.floor(time / (iterationDuration + sequenceRepeat.repeatDelay)), sequenceRepeat.repeat);
                     const local = Math.min(time - iteration * (iterationDuration + sequenceRepeat.repeatDelay), iterationDuration);
@@ -331,17 +334,18 @@ describe("AnimationTracksResolver sequence values", () => {
 
         it(`follows ${name} through a sequence's mirrors, its easing running forwards`, () => {
             const animation = AnimationTiming.of(transition);
+            const {duration, easing} = resolveTransition(animation.transition);
             const sequence = SequenceTiming.builder()
-                .add('a', animation, position)
+                .add(animation, 'a', position)
                 .build({...sequenceRepeat, repeatMode: 'mirror'});
             const effects = sequenceTracksOf(sequence, {a: valuesWithStop}).get(element)!.x!;
-            const iterationDuration = position + animation.duration;
+            const iterationDuration = position + duration;
             const definedAt = (time: number) => {
                 const iteration = Math.min(Math.floor(time / (iterationDuration + sequenceRepeat.repeatDelay)), sequenceRepeat.repeat);
                 const local = Math.min(time - iteration * (iterationDuration + sequenceRepeat.repeatDelay), iterationDuration);
-                if (iteration % 2 === 0) return stopsWithStop.valueAt(easedProgressAt(animation.easing, (local - position) / animation.duration));
-                const playedBack = (iterationDuration - local - position) / animation.duration;
-                return stopsWithStop.flip().valueAt(easedProgressAt(animation.easing, 1 - playedBack));
+                if (iteration % 2 === 0) return stopsWithStop.valueAt(easedProgressAt(easing, (local - position) / duration));
+                const playedBack = (iterationDuration - local - position) / duration;
+                return stopsWithStop.flip().valueAt(easedProgressAt(easing, 1 - playedBack));
             };
             expectTrackToFollow(effects, definedAt, tolerance, 6);
         });
@@ -352,8 +356,8 @@ describe("AnimationTracksResolver sequences", () => {
 
     it("repeats the outermost repeating sequence natively, holding each entry through the rest of the iteration", () => {
         const sequence = SequenceTiming.builder()
-            .add('a', AnimationTiming.of({duration: 1}))
-            .add('b', AnimationTiming.of({duration: 1}))
+            .add(AnimationTiming.of({duration: 1}), 'a')
+            .add(AnimationTiming.of({duration: 1}), 'b')
             .build({repeat: 2, repeatDelay: 0.5});
         const tracks = sequenceTracksOf(sequence, {a: {x: line.x}, b: {y: line.x}}).get(element)!;
         expect(tracks.x!.map(timingOf)).toEqual([
@@ -369,8 +373,8 @@ describe("AnimationTracksResolver sequences", () => {
 
     it("reverses a sequence's iteration in time", () => {
         const sequence = SequenceTiming.builder()
-            .add('a', AnimationTiming.of({duration: 1}))
-            .add('b', AnimationTiming.of({duration: 1}), '+0')
+            .add(AnimationTiming.of({duration: 1}), 'a')
+            .add(AnimationTiming.of({duration: 1}), 'b', '+0')
             .build({repeat: 1, repeatDelay: 0.5, repeatMode: 'reverse'});
         const effects = sequenceTracksOf(sequence, {a: {x: line.x}, b: {y: line.x}}).get(element)!.x!;
         expect(effects.map(timingOf)).toEqual([{delay: 0, duration: 4.5, iterations: 1, direction: 'normal', fill: 'both'}]);
@@ -379,20 +383,20 @@ describe("AnimationTracksResolver sequences", () => {
 
     it("bakes the repeats inside the outermost one", () => {
         const nested = SequenceTiming.builder()
-            .add('a', AnimationTiming.of({duration: 1, easing: 'easeIn'}))
+            .add(AnimationTiming.of({duration: 1, easing: 'easeIn'}), 'a')
             .build({repeat: 1, repeatDelay: 0.5, repeatMode: 'mirror'});
-        const sequence = SequenceTiming.builder().add('nested', nested).build({repeat: 1});
+        const sequence = SequenceTiming.builder().add(nested, 'nested').build({repeat: 1});
         const effects = sequenceTracksOf(sequence, {'nested>a': {x: line.x}}).get(element)!.x!;
         expect(effects.map(timingOf)).toEqual([{delay: 0, duration: 2.5, iterations: 2, direction: 'normal', fill: 'both'}]);
 
-        const easeIn = AnimationTiming.of({duration: 1, easing: 'easeIn'}).easing;
+        const easeIn = resolveEasing('easeIn');
         expect(sample(effects, [0.5, 1.25, 2, 3, 4.5])).toEqual(closeTo([[easeIn.progressAt(0.5), 1, 1 - easeIn.progressAt(0.5), easeIn.progressAt(0.5), 1 - easeIn.progressAt(0.5)]])[0]);
     });
 
     it("continues an infinite entry in a finitely repeating sequence after its first play, under the sequence's effects", () => {
         const sequence = SequenceTiming.builder()
-            .add('a', AnimationTiming.of({duration: 1}, {repeat: Infinity, repeatDelay: 0.5}))
-            .add('b', AnimationTiming.of({duration: 1}), '+0')
+            .add(AnimationTiming.of({duration: 1}, {repeat: Infinity, repeatDelay: 0.5}), 'a')
+            .add(AnimationTiming.of({duration: 1}), 'b', '+0')
             .build({repeat: 1});
         const effects = sequenceTracksOf(sequence, {a: {x: line.x}, b: {y: line.x}}).get(element)!.x!;
         expect(effects.map(timingOf)).toEqual([
@@ -405,7 +409,7 @@ describe("AnimationTracksResolver sequences", () => {
 
     it("drops an infinite entry's continuation in an infinitely repeating sequence", () => {
         const sequence = SequenceTiming.builder()
-            .add('a', AnimationTiming.of({duration: 1}, {repeat: Infinity, repeatDelay: 0.5}))
+            .add(AnimationTiming.of({duration: 1}, {repeat: Infinity, repeatDelay: 0.5}), 'a')
             .build({repeat: Infinity});
         expect(sequenceTracksOf(sequence, {a: {x: line.x}}).get(element)!.x!.map(timingOf))
             .toEqual([{delay: 0, duration: 1, iterations: Infinity, direction: 'normal', fill: 'both'}]);
@@ -413,8 +417,8 @@ describe("AnimationTracksResolver sequences", () => {
 
     it("fills only the first-starting effect backwards, and forwards only what nothing earlier outlasts", () => {
         const sequence = SequenceTiming.builder()
-            .add('a', AnimationTiming.of({duration: 2}), 0.5)
-            .add('b', AnimationTiming.of({duration: 1}), 0)
+            .add(AnimationTiming.of({duration: 2}), 'a', 0.5)
+            .add(AnimationTiming.of({duration: 1}), 'b', 0)
             .build();
         expect(sequenceTracksOf(sequence, {a: {x: line.x}, b: {x: line.x}}).get(element)!.x!.map(({delay, fill}) => ({delay, fill})))
             .toEqual([{delay: 0.5, fill: 'forwards'}, {delay: 0, fill: 'backwards'}]);
@@ -422,9 +426,9 @@ describe("AnimationTracksResolver sequences", () => {
 
     it("sets an entry without duration at its position, between the entries around it", () => {
         const sequence = SequenceTiming.builder()
-            .add('a', AnimationTiming.of({duration: 1}))
-            .add('b', AnimationTiming.of({duration: 0}), '+0.5')
-            .add('c', AnimationTiming.of({duration: 1}), '+0.5')
+            .add(AnimationTiming.of({duration: 1}), 'a')
+            .add(AnimationTiming.of({duration: 0}), 'b', '+0.5')
+            .add(AnimationTiming.of({duration: 1}), 'c', '+0.5')
             .build();
         const effects = sequenceTracksOf(sequence, {a: {x: line.x}, b: {x: {0: 0.25, 1: 0.75}}, c: {x: {0: 0.75, 1: 0}}}).get(element)!.x!;
         expect(sample(effects, [1.25, 1.75, 2.5, 3.5])).toEqual(closeTo([[1, 0.75, 0.375, 0]])[0]);
@@ -432,8 +436,8 @@ describe("AnimationTracksResolver sequences", () => {
 
     it("drops an effect declared earlier that lies within a later one", () => {
         const sequence = SequenceTiming.builder()
-            .add('a', AnimationTiming.of({duration: 0.5}), 0.25)
-            .add('b', AnimationTiming.of({duration: 1}), 0)
+            .add(AnimationTiming.of({duration: 0.5}), 'a', 0.25)
+            .add(AnimationTiming.of({duration: 1}), 'b', 0)
             .build();
         expect(sequenceTracksOf(sequence, {a: {x: line.x}, b: {x: line.x}}).get(element)!.x!.map(({delay, fill}) => ({delay, fill})))
             .toEqual([{delay: 0, fill: 'both'}]);
@@ -448,8 +452,8 @@ describe("AnimationTracksResolver staggered sequences", () => {
 
     it("plays the sequence once per element index, chaining each copy's entries on their own", () => {
         const sequence = SequenceTiming.builder()
-            .add('lift', AnimationTiming.of({duration: 1}))
-            .add('glow', AnimationTiming.of({duration: 1}))
+            .add(AnimationTiming.of({duration: 1}), 'lift')
+            .add(AnimationTiming.of({duration: 1}), 'glow')
             .build({delay: index => index * 0.25});
         const tracks = sequenceTracksOf(sequence, {lift: {x: line.x}, glow: {y: line.x}}, {lift: cards, glow: icons});
         expect(startsOf(tracks, cards, 'x')).toEqual([0, 0.25, 0.5]);
@@ -458,8 +462,8 @@ describe("AnimationTracksResolver staggered sequences", () => {
 
     it("pushes an entry of one copy on by its own stagger, as it would one element", () => {
         const sequence = SequenceTiming.builder()
-            .add('lift', AnimationTiming.of({duration: 1}, {delay: index => index * 0.5}))
-            .add('glow', AnimationTiming.of({duration: 1}))
+            .add(AnimationTiming.of({duration: 1}, {delay: index => index * 0.5}), 'lift')
+            .add(AnimationTiming.of({duration: 1}), 'glow')
             .build({delay: index => index * 0.25});
         const tracks = sequenceTracksOf(sequence, {lift: {x: line.x}, glow: {y: line.x}}, {lift: cards, glow: icons});
         expect(startsOf(tracks, cards, 'x')).toEqual([0, 0.75, 1.5]);
@@ -468,8 +472,8 @@ describe("AnimationTracksResolver staggered sequences", () => {
 
     it("rejects animations with different numbers of elements", () => {
         const sequence = SequenceTiming.builder()
-            .add('lift', AnimationTiming.of({duration: 1}))
-            .add('glow', AnimationTiming.of({duration: 1}))
+            .add(AnimationTiming.of({duration: 1}), 'lift')
+            .add(AnimationTiming.of({duration: 1}), 'glow')
             .build({delay: index => index * 0.25});
         expect(() => sequenceTracksOf(sequence, {lift: {x: line.x}, glow: {y: line.x}}, {lift: cards, glow: icons.slice(1)})).toThrow();
     });
@@ -480,8 +484,8 @@ describe("AnimationTracksResolver effect chains", () => {
 
     it("starts an entry without a value at 0 from the value the track shows as it starts", () => {
         const sequence = SequenceTiming.builder()
-            .add('a', AnimationTiming.of({duration: 1}))
-            .add('b', AnimationTiming.of({duration: 1}), '-0.5')
+            .add(AnimationTiming.of({duration: 1}), 'a')
+            .add(AnimationTiming.of({duration: 1}), 'b', '-0.5')
             .build();
         const effects = sequenceTracksOf(sequence, {a: {x: {0: 0, 1: 1}}, b: {x: {1: 2}}}).get(element)!.x!;
         expect(sample(effects, [0.25, 0.75, 1.5])).toEqual(closeTo([[0.25, 0.5 + 0.25 * 1.5, 2]])[0]);
@@ -530,8 +534,8 @@ describe("AnimationTracksResolver values passed through", () => {
 
     it("starts an entry from the stop the track holds as it starts", () => {
         const sequence = SequenceTiming.builder()
-            .add('a', AnimationTiming.of({duration: 1}))
-            .add('b', AnimationTiming.of({duration: 1}), '+0.5')
+            .add(AnimationTiming.of({duration: 1}), 'a')
+            .add(AnimationTiming.of({duration: 1}), 'b', '+0.5')
             .build();
         const valuesByPath = new Map([['a', [elementValuesOf(element, {color: {0: 'red', 1: 'blue'}})]], ['b', [elementValuesOf(element, {color: {1: 'green'}})]]]);
         const layout = layoutOf(sequence, new Map([['a', 1], ['b', 1]]));
@@ -554,7 +558,7 @@ describe("cssEasingOf", () => {
     });
 });
 
-describe("EasingFunction windows", () => {
+describe("Easing windows", () => {
     it("gives the progress of the window without rescaling it, and runs it backwards when reversed", () => {
         const easing = linear.windowed(0.25, 0.75);
         expect([easing.progressAt(0), easing.progressAt(1), easing.reversed().progressAt(0)]).toEqual([0.25, 0.75, 0.75]);

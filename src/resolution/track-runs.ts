@@ -1,4 +1,5 @@
-import {type EasingFunction, linear} from "../easing.ts";
+import type {Easing} from "../easing.ts";
+import {linear} from "../easing-specifier.ts";
 import type {Progress, Seconds} from "../types.ts";
 import {PropertyStops, type StopValue} from "./stops.ts";
 import type {RepeatOptions} from "../playback-options.ts";
@@ -7,7 +8,7 @@ import type {RepeatOptions} from "../playback-options.ts";
 export interface TrackSpan {
     start: Seconds;
     end: Seconds;
-    easing: EasingFunction;
+    easing: Easing;
     stops: PropertyStops;
 }
 
@@ -15,7 +16,7 @@ export interface TrackSpan {
 export class TrackRun {
     constructor(readonly spans: readonly TrackSpan[]) {}
 
-    static play(duration: Seconds, easing: EasingFunction, stops: PropertyStops): TrackRun {
+    static play(duration: Seconds, easing: Easing, stops: PropertyStops): TrackRun {
         return new TrackRun([{start: 0, end: duration, easing, stops}]);
     }
 
