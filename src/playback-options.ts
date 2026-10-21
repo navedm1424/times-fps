@@ -2,15 +2,15 @@ import type {RepeatOptions, Seconds, Stagger} from "./types.js";
 import {checkNumber} from "./utils/validation.js";
 
 /** The options of an animation's timing: a delay before the first play, and how it repeats. */
-export interface AnimationTimingOptions extends RepeatOptions {
+export interface AnimationPlaybackOptions extends RepeatOptions {
     delay?: Seconds | Stagger;
 }
 
 /** A sequence's timing takes the same options as an animation's. */
-export type SequenceTimingOptions = AnimationTimingOptions;
+export type SequencePlaybackOptions = AnimationPlaybackOptions;
 
 /** Delays and repeat delays must be finite, and the repeat count a number; `label` names the timing in messages. */
-export function checkTimingOptions(options: AnimationTimingOptions, label: string): void {
+export function checkPlaybackOptions(options: AnimationPlaybackOptions, label: string): void {
     if (typeof options.delay === 'number') checkNumber(options.delay, `${label}'s delay`);
     checkNumber(options.repeatDelay, `${label}'s repeat delay`);
     checkNumber(options.repeat, `${label}'s repeat count`, {allowInfinity: true});

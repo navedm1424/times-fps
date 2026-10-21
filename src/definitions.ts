@@ -1,7 +1,7 @@
 import {AnimationTiming, type AnimationTimingDescriptor, animationTimingOf} from "./animation.js";
 import {type At, parseAt} from "./at.js";
 import {checkNewName, checkPosition, SequenceTiming, type SequenceTimingBuilder, type SequenceTimingEntries} from "./sequence.js";
-import type {SequenceTimingOptions} from "./timing-options.js";
+import type {SequencePlaybackOptions} from "./playback-options.js";
 import {type PlayOptions, WAAPIAnimator} from "./waapi/animator.js";
 import type {AnimationControls} from "./waapi/controls.js";
 import {type AnimationMapping, type AnimationValues, type MappingTree, type SequenceMapping, type SequenceMappingNode, type Target} from "./waapi/mapping.js";
@@ -133,7 +133,7 @@ export class SequenceDefinitionBuilder<Names extends string = never> {
     }
 
     /** Names the unnamed entries in order, as `a` to `z`, then `aa` and on, skipping the names given. */
-    build(options: SequenceTimingOptions = {}): SequenceDefinition {
+    build(options: SequencePlaybackOptions = {}): SequenceDefinition {
         const givenNames = new Set(this.givenNames);
         let builder: SequenceTimingBuilder<SequenceTimingEntries> = SequenceTiming.builder();
         const mappings: { [name: string]: MappingTree } = {};

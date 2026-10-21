@@ -4,8 +4,8 @@ import {CubicBezierEasing, type EasingFunction, linear, StepsEasing} from "../sr
 import {PropertyStops, type NumericValueStops} from "../src/resolution/stops.js";
 import {computeTimings, type EntryPath, type SequenceTimings} from "../src/resolution/timings.js";
 import {SequenceTiming} from "../src/sequence.js";
-import type {AnimationTimingOptions} from "../src/timing-options.js";
-import type {TransitionDescriptor} from "../src/transition.js";
+import type {AnimationPlaybackOptions} from "../src/playback-options.js";
+import type {TransitionOptions} from "../src/transition.js";
 import type {RepeatOptions} from "../src/types.js";
 import {lerp} from "../src/utils/math.js";
 import type {NativeAnimationEffect, NativeKeyframe} from "../src/waapi/native-effects.js";
@@ -173,7 +173,7 @@ describe("computeTimings", () => {
 describe("AnimationTracksResolver layouts", () => {
     const play = {duration: 1};
     const effectsOf = (animation: AnimationTiming) => animationTracksOf(animation).get(target)!.x!;
-    const repeats = (options: AnimationTimingOptions) => effectsOf(AnimationTiming.of(play, {repeatDelay: 0.5, ...options}));
+    const repeats = (options: AnimationPlaybackOptions) => effectsOf(AnimationTiming.of(play, {repeatDelay: 0.5, ...options}));
 
     it("plays once with the easing on the effect and the stops as keyframes", () => {
         const [effect, ...rest] = effectsOf(AnimationTiming.of({duration: 1, easing: 'easeInOut'}));
@@ -260,7 +260,7 @@ describe("AnimationTracksResolver layouts", () => {
 
 const valuesWithStop = {x: {0: 0, 0.4: 0.7, 1: 1}};
 const stopsWithStop = resolvedStopsOf(valuesWithStop.x);
-const transitions: [string, TransitionDescriptor, number][] = [
+const transitions: [string, TransitionOptions, number][] = [
     ['a cubic Bézier easing', {duration: 1, easing: 'easeInOut'}, 1e-6],
     ['an overshooting cubic Bézier easing', {duration: 1, easing: [0.3, 1.6, 0.6, 1]}, 1e-6],
     ['a jump-start steps easing', {duration: 1, easing: [4, 'jumpStart']}, 1e-6],

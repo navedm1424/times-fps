@@ -1,7 +1,7 @@
 import {describe, expect, it} from "vitest";
 import {AnimationTiming, animationTimingOf, TimedTweenAnimation} from "../src/animation.js";
 import {stagger} from "../src/stagger.js";
-import type {TransitionDescriptor} from "../src/transition.js";
+import type {TransitionOptions} from "../src/transition.js";
 
 describe("AnimationTiming.of", () => {
     it("rejects time fields that aren't finite", () => {
@@ -47,7 +47,7 @@ describe("AnimationTiming.of", () => {
         expect(AnimationTiming.of({duration: 1, bounce: 0.2}).duration).toBe(1);
         expect(AnimationTiming.of({visualDuration: 0.5, bounce: 0.2}).easing.constructor.name).toBe('SpringEasing');
         expect(AnimationTiming.of({stiffness: 100, damping: 10}).easing.constructor.name).toBe('SpringEasing');
-        const mixed = (transition: object) => () => AnimationTiming.of(transition as TransitionDescriptor);
+        const mixed = (transition: object) => () => AnimationTiming.of(transition as TransitionOptions);
         expect(mixed({duration: 1, easing: 'easeIn', bounce: 0.2})).toThrow(TypeError);
         expect(mixed({duration: 1, stiffness: 100, damping: 10})).toThrow(TypeError);
         expect(mixed({visualDuration: 1, duration: 1, bounce: 0})).toThrow(TypeError);

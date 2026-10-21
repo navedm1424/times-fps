@@ -6,7 +6,7 @@ import {invLerp, lerp, solveMonotone} from "./utils/math.js";
 export type CubicBezierEasingDescriptor = readonly [x1: number, y1: number, x2: number, y2: number];
 export type StepPosition = 'jumpStart' | 'jumpEnd' | 'jumpNone' | 'jumpBoth';
 export type StepsEasingDescriptor = readonly [count: number, position?: StepPosition];
-export type EasingDescriptor = 'linear' | 'ease' | 'easeIn' | 'easeOut' | 'easeInOut' | CubicBezierEasingDescriptor | StepsEasingDescriptor;
+export type EasingDescriptor = EasingPreset | CubicBezierEasingDescriptor | StepsEasingDescriptor;
 
 /** As in CSS `cubic-bezier()`. */
 export function cubicBezier(x1: number, y1: number, x2: number, y2: number): CubicBezierEasingDescriptor {
@@ -254,16 +254,19 @@ export class SpringEasing extends EasingFunction {
 
 export const linear = new LinearEasing();
 
-const presetEasings: { [Preset in Extract<EasingDescriptor, string>]: EasingFunction } = {
+const easingPresets = {
     linear,
     ease: CubicBezierEasing.of(0.25, 0.1, 0.25, 1),
     easeIn: CubicBezierEasing.of(0.42, 0, 1, 1),
     easeOut: CubicBezierEasing.of(0, 0, 0.58, 1),
     easeInOut: CubicBezierEasing.of(0.42, 0, 0.58, 1)
+} as const satisfies {
+    [preset: string]: EasingFunction;
 };
+type EasingPreset = keyof typeof easingPresets;
 
 export function resolveEasing(easing: EasingDescriptor): EasingFunction {
-    if (typeof easing === 'string') return presetEasings[easing];
+    if (typeof easing === 'string') return easingPresets[easing];
     if (easing.length === 4) return new CubicBezierEasing(easing);
     return new StepsEasing(easing);
 }

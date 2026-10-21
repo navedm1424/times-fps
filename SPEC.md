@@ -218,7 +218,7 @@ type SequenceTimingOptions = AnimationTimingOptions;
 
 - **For a sequence,** `reverse` reverses the whole iteration in time, and `mirror` does the same but keeps each animation's easing running forwards through flipped values.
 - **`Infinity`** is valid on animations and sequences, including an infinite entry inside an infinitely repeating sequence.
-- **Clamping** is `clampedDelay` and `clampedRepeats` (`src/timing-options.ts`). `NaN` and infinite times throw through `checkNumber` (`src/utils/validation.ts`).
+- **Clamping** is `clampedDelay` and `clampedRepeats` (`src/playback-options.ts`). `NaN` and infinite times throw through `checkNumber` (`src/utils/validation.ts`).
 
 ### 2.6 Staggers
 
@@ -599,7 +599,7 @@ definition.play(options?: PlayOptions): AnimationControls;
 | `src/cubic-bezier.ts` | Cubic Bézier math: coordinates, inverses, turning points, inflections, splitting |
 | `src/damped-spring.ts` | Closed-form damped springs in each damping regime: positions, turning times, rest time |
 | `src/transition.ts` | Transition descriptors, telling their kinds apart, checking them, and resolving them into a duration and an easing function |
-| `src/timing-options.ts` | `AnimationTimingOptions` and `SequenceTimingOptions`, their checks and their clamps |
+| `src/playback-options.ts` | `AnimationTimingOptions` and `SequenceTimingOptions`, their checks and their clamps |
 | `src/stagger.ts` | `stagger` and `StaggerOptions` |
 | `src/animation.ts` | `AnimationTiming`, `AnimationTimingDescriptor`, `animationTimingOf` and `TimedTweenAnimation`, with validation and clamping |
 | `src/at.ts` | `At`, `parseAt` and the parsed form |

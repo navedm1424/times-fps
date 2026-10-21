@@ -8,11 +8,11 @@ export {AnimationTiming} from "./animation.js";
 export type {AnimationTimingDescriptor} from "./animation.js";
 export {SequenceTiming} from "./sequence.js";
 export type {SequenceTimingBuilder} from "./sequence.js";
-export type {AnimationTimingOptions, SequenceTimingOptions} from "./timing-options.js";
+export type {AnimationPlaybackOptions, SequencePlaybackOptions} from "./playback-options.js";
 export type {At} from "./at.js";
 export type {
-    DurationSpringTransitionDescriptor, EasedTransitionDescriptor, PhysicalSpringTransitionDescriptor, SpringTransitionDescriptor, TransitionDescriptor,
-    VisualSpringTransitionDescriptor
+    DurationSpringTransitionOptions, EasedTransitionOptions, PhysicalSpringTransitionOptions, SpringTransitionOptions, TransitionOptions,
+    VisualSpringTransitionOptions
 } from "./transition.js";
 export type {Progress, RepeatMode, RepeatOptions, Seconds, Stagger} from "./types.js";
 export type {AnimationMapping, AnimationValues, CSSSelector, CSSValue, SequenceMapping, Target, ValueStops} from "./waapi/mapping.js";

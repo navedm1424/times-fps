@@ -1,6 +1,6 @@
 import {AnimationTiming, type AnimationTimingDescriptor, animationTimingOf, type TimedTweenAnimation} from "./animation.js";
 import {type At, type ParsedAt, parseAt} from "./at.js";
-import {checkTimingOptions, clampedDelay, clampedRepeats, type SequenceTimingOptions} from "./timing-options.js";
+import {checkPlaybackOptions, clampedDelay, clampedRepeats, type SequencePlaybackOptions} from "./playback-options.js";
 import {checkNumber} from "./utils/validation.js";
 
 export interface AnimationTimingEntry<N extends string = string> {
@@ -58,19 +58,19 @@ export class SequenceTimingBuilder<SE extends SequenceTimingEntries = {}> {
         return new SequenceTimingBuilder([...this.names, name], {...this.entries, [name]: entry});
     }
 
-    build(options: SequenceTimingOptions = {}): SequenceTiming<{ [K in keyof SE]: SE[K] }> {
+    build(options: SequencePlaybackOptions = {}): SequenceTiming<{ [K in keyof SE]: SE[K] }> {
         return new SequenceTiming(this.names, this.entries as { [K in keyof SE]: SE[K] }, options);
     }
 }
 
 /** Named timings laid out in time, without targets or values. */
 export class SequenceTiming<SE extends SequenceTimingEntries = SequenceTimingEntries> {
-    readonly options: SequenceTimingOptions;
+    readonly options: SequencePlaybackOptions;
 
     constructor(
         readonly names: readonly string[],
         readonly entries: SE,
-        options: SequenceTimingOptions = {}
+        options: SequencePlaybackOptions = {}
     ) {
         if (names.length === 0)
             throw new Error("A sequence needs at least one entry.");
@@ -82,7 +82,7 @@ export class SequenceTiming<SE extends SequenceTimingEntries = SequenceTimingEnt
             checkPosition(`Entry "${name}"`, entry.at, earlierNames);
         });
 
-        checkTimingOptions(options, "The sequence");
+        checkPlaybackOptions(options, "The sequence");
         this.options = clampedDelay(clampedRepeats(options));
     }
 
