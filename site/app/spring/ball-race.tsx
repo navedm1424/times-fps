@@ -1,7 +1,7 @@
 "use client";
 
 import {useRef, useState} from "react";
-import {spring, type SpringTransition} from "timesfps";
+import type {SpringTransitionOptions} from "timesfps";
 import {PlayIcon} from "@/components/icons/play-icon";
 import {ChipTray} from "@/components/tray/chip-tray";
 import {TrayIconButton} from "@/components/tray/tray-icon-button";
@@ -14,10 +14,10 @@ const balls: { id: BallId; title: string; method: string }[] = [
 ];
 
 /** Brings the balls back to the start, a moment after the last of them reaches the end. */
-const returnSpring = spring({visualDuration: 0.35, bounce: 0});
+const returnSpring: SpringTransitionOptions = {visualDuration: 0.35, bounce: 0};
 const returnDelayInMilliseconds = 1000;
 
-export function BallRace({transition}: { transition: SpringTransition }) {
+export function BallRace({transition}: { transition: SpringTransitionOptions }) {
     const [playing, setPlaying] = useState(false);
     const [playAllSelection, setPlayAllSelection] = useState<BallId[]>(balls.map(({id}) => id));
     const ballElements = useRef<{ [Id in BallId]?: HTMLElement | null }>({});

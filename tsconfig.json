@@ -4,6 +4,7 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "verbatimModuleSyntax": true,
+    "rewriteRelativeImportExtensions": true,
     "declaration": true,
     "stripInternal": true,
     "outDir": "dist",
@@ -12,5 +13,6 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src/**/*"]
+  "include": ["src/**/*"],
+  "exclude": ["src/internals.ts"]
 }

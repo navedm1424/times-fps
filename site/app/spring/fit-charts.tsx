@@ -2,7 +2,7 @@
 
 import {type PointerEvent, type ReactNode, useLayoutEffect, useRef, useState} from "react";
 import {ChipTray} from "@/components/tray/chip-tray";
-import {progressPrecision} from "@/lib/timesfps-internals";
+import {PRECISION} from "timesfps/internals";
 import {type ChartBox, chartMargin, niceStep, polylinePoints, type Scale, scaleFor, splinePath, ticksBetween} from "./chart-scale";
 import type {SpringFit} from "./spring-fit";
 
@@ -37,10 +37,20 @@ export function FitCharts({fit}: { fit: SpringFit }) {
 
             <div className="grid gap-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h3 className="text-sm font-medium">Error <span className="font-normal text-muted-foreground">spline − spring</span></h3>
-                    <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <span className="h-2.5 w-4 rounded-sm bg-(--precision-band)"/>
-                        ± {progressPrecision} precision
+                    <h3 className="text-sm font-medium">Error</h3>
+                    <span className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                        <span className="flex items-center gap-2">
+                            <span className="h-0.5 w-3 rounded-full bg-(--series-spline)"/>
+                            spline − spring
+                        </span>
+                        <span className="flex items-center gap-2">
+                            <span className="h-0.5 w-3 rounded-full bg-(--series-keyframes)"/>
+                            keyframes − spring
+                        </span>
+                        <span className="flex items-center gap-2">
+                            <span className="h-2.5 w-4 rounded-sm bg-(--precision-band)"/>
+                            ± {PRECISION} precision
+                        </span>
                     </span>
                 </div>
                 <ErrorChart fit={fit} hoveredIndex={hoveredIndex} onHover={setHoveredIndex}/>
@@ -109,8 +119,8 @@ function CurvesChart({fit, visibleLayers, hoveredIndex, onHover}: { fit: SpringF
 }
 
 function ErrorChart({fit, hoveredIndex, onHover}: { fit: SpringFit } & HoverProps) {
-    const {times, errors} = fit;
-    const reach = Math.max(progressPrecision * 1.5, ...errors.map(Math.abs)) * 1.1;
+    const {times, splineErrors, keyframeErrors} = fit;
+    const reach = Math.max(PRECISION * 1.5, ...splineErrors.map(Math.abs), ...keyframeErrors.map(Math.abs)) * 1.1;
 
     return (
         <ChartFrame
@@ -122,18 +132,28 @@ function ErrorChart({fit, hoveredIndex, onHover}: { fit: SpringFit } & HoverProp
             formatValue={value => value === 0 ? "0" : value.toExponential(0)}
             hoveredIndex={hoveredIndex}
             onHover={onHover}
-            tooltip={index => <TooltipRow label="Error" value={errors[index]!.toExponential(2)} keyClassName="bg-(--series-spline)"/>}
+            tooltip={index => (
+                <>
+                    <TooltipRow label="Spline" value={splineErrors[index]!.toExponential(2)} keyClassName="bg-(--series-spline)"/>
+                    <TooltipRow label="Keyframes" value={keyframeErrors[index]!.toExponential(2)} keyClassName="bg-(--series-keyframes)"/>
+                </>
+            )}
             background={(scale, {width}) => (
-                <rect x={chartMargin.left} y={scale.y(progressPrecision)} width={width - chartMargin.left - chartMargin.right}
-                      height={scale.y(-progressPrecision) - scale.y(progressPrecision)} fill="var(--precision-band)"/>
+                <rect x={chartMargin.left} y={scale.y(PRECISION)} width={width - chartMargin.left - chartMargin.right}
+                      height={scale.y(-PRECISION) - scale.y(PRECISION)} fill="var(--precision-band)"/>
             )}
         >
             {scale => (
                 <>
-                    <polyline points={polylinePoints(times, errors, scale)} fill="none"
+                    <polyline points={polylinePoints(times, splineErrors, scale)} fill="none"
                               stroke="var(--series-spline)" strokeWidth={1.5} strokeLinejoin="round"/>
+                    <polyline points={polylinePoints(times, keyframeErrors, scale)} fill="none"
+                              stroke="var(--series-keyframes)" strokeWidth={1.5} strokeLinejoin="round"/>
                     {hoveredIndex !== undefined && (
-                        <HoverDot scale={scale} time={times[hoveredIndex]!} value={errors[hoveredIndex]!} color="var(--series-spline)"/>
+                        <>
+                            <HoverDot scale={scale} time={times[hoveredIndex]!} value={splineErrors[hoveredIndex]!} color="var(--series-spline)"/>
+                            <HoverDot scale={scale} time={times[hoveredIndex]!} value={keyframeErrors[hoveredIndex]!} color="var(--series-keyframes)"/>
+                        </>
                     )}
                 </>
             )}

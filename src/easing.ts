@@ -1,7 +1,7 @@
-import {CubicBezier} from "./cubic-bezier.js";
-import type {DampedSpring} from "./damped-spring.js";
-import type {Progress, Seconds} from "./types.js";
-import {invLerp, lerp, solveMonotone} from "./utils/math.js";
+import {CubicBezier} from "./cubic-bezier.ts";
+import type {DampedSpring} from "./damped-spring.ts";
+import type {Progress, Seconds} from "./types.ts";
+import {invLerp, lerp, solveMonotone} from "./utils/math.ts";
 
 export type CubicBezierEasingDescriptor = readonly [x1: number, y1: number, x2: number, y2: number];
 export type StepPosition = 'jumpStart' | 'jumpEnd' | 'jumpNone' | 'jumpBoth';

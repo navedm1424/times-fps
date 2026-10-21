@@ -1,12 +1,12 @@
 import {animate, createGeneratorEasing, generateLinearEasing, spring as motionSpring, type ValueTransition} from "motion";
-import {AnimationDefinition, animate as animateNatively, type SpringTransition} from "timesfps";
+import {animation, type SpringTransitionOptions} from "timesfps";
 import {physicsOf} from "./spring-parameters";
 
 export type BallId = "css" | "timesfps" | "motion";
 
 /** Moves the ball across its track, in pixels, from `startTime` on the document timeline, and holds it at `to` until `release`. */
 interface BallPlayer {
-    play(ball: HTMLElement, from: number, to: number, spring: SpringTransition, startTime: number): Promise<void>;
+    play(ball: HTMLElement, from: number, to: number, spring: SpringTransitionOptions, startTime: number): Promise<void>;
     release(ball: HTMLElement): void;
 }
 
@@ -133,7 +133,7 @@ const ballPlayers: { [Id in BallId]: BallPlayer } = {
     },
     timesfps: {
         async play(ball, from, to, spring, startTime) {
-            const controls = animateNatively(AnimationDefinition.of(spring), {target: ball, values: {translate: {0: from, 1: to}}});
+            const controls = animation(ball, {translate: {0: from, 1: to}}, spring).play();
             controls.startTime = startTime / 1000;
             await controls.finished;
         },
@@ -153,7 +153,7 @@ export function nextFrameTime(): Promise<number> {
 }
 
 /** Plays the ball to the end with its own player, after which its CSS, keyed by `data-position`, holds it there. */
-export async function playToEnd(id: BallId, ball: HTMLElement, spring: SpringTransition, startTime: number): Promise<void> {
+export async function playToEnd(id: BallId, ball: HTMLElement, spring: SpringTransitionOptions, startTime: number): Promise<void> {
     const player = ballPlayers[id];
     await player.play(ball, 0, travelOf(ball), spring, startTime);
     ball.dataset.position = "end";
@@ -161,8 +161,8 @@ export async function playToEnd(id: BallId, ball: HTMLElement, spring: SpringTra
 }
 
 /** Brings the balls back from the end as one animation, so they move as one; their tracks are equally wide. */
-export async function returnToStart(balls: HTMLElement[], spring: SpringTransition): Promise<void> {
-    await animateNatively(AnimationDefinition.of(spring), {target: balls, values: {translate: {0: travelOf(balls[0]!), 1: 0}}}).finished;
+export async function returnToStart(balls: HTMLElement[], spring: SpringTransitionOptions): Promise<void> {
+    await animation(balls, {translate: {0: travelOf(balls[0]!), 1: 0}}, spring).play().finished;
     for (const ball of balls) {
         delete ball.dataset.position;
         cancelAnimations(ball);

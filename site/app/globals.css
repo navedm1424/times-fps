@@ -83,6 +83,7 @@
   --sidebar-ring: oklch(0.708 0 0);
   --series-spring: #2a78d6;
   --series-spline: #eb6834;
+  --series-keyframes: #1baf7a;
   --precision-band: color-mix(in oklab, #2a78d6 10%, transparent);
   --chart-grid: #e1e0d9;
   --chart-axis: #c3c2b7;
@@ -129,6 +130,7 @@
   --sidebar-ring: oklch(0.556 0 0);
   --series-spring: #3987e5;
   --series-spline: #d95926;
+  --series-keyframes: #199e70;
   --precision-band: color-mix(in oklab, #3987e5 16%, transparent);
   --chart-grid: #2c2c2a;
   --chart-axis: #383835;

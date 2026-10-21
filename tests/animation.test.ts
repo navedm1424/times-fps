@@ -1,9 +1,9 @@
 import {describe, expect, it} from "vitest";
-import {AnimationTiming, TimedTweenTiming} from "../src/animation.js";
-import {DampedSpring} from "../src/damped-spring.js";
-import {PRECISION} from "../src/constants.js";
-import {stagger} from "../src/stagger.js";
-import type {TransitionOptions} from "../src/transition.js";
+import {AnimationTiming, TimedTweenTiming} from "../src/animation.ts";
+import {DampedSpring} from "../src/damped-spring.ts";
+import {PRECISION} from "../src/constants.ts";
+import {stagger} from "../src/stagger.ts";
+import type {TransitionOptions} from "../src/transition.ts";
 
 describe("AnimationTiming.of", () => {
     it("rejects time fields that aren't finite", () => {

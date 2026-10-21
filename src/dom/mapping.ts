@@ -1,5 +1,5 @@
-import type {SubsequenceTimingEntry, SequenceTiming, SequenceTimingEntries} from "../sequence.js";
-import {sortedByKey} from "../utils/records.js";
+import type {SubsequenceTimingEntry, SequenceTiming, SequenceTimingEntries} from "../sequence.ts";
+import {sortedByKey} from "../utils/records.ts";
 
 export type CSSSelector = string;
 

@@ -1,5 +1,5 @@
 import {describe, expect, it} from "vitest";
-import {AnimationControls} from "../src/waapi/controls.js";
+import {AnimationControls} from "../src/waapi/controls.ts";
 
 describe("AnimationControls", () => {
     it("calls a finish listener once every animation has finished, until it's removed", () => {

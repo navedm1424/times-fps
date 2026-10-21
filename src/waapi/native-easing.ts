@@ -1,4 +1,4 @@
-import type {CubicBezierEasingDescriptor, StepPosition, StepsEasingDescriptor} from "../easing.js";
+import type {CubicBezierEasingDescriptor, StepPosition, StepsEasingDescriptor} from "../easing.ts";
 
 /** A point of a CSS `linear()` easing; two at the same input make a jump. */
 export interface LinearPoint {

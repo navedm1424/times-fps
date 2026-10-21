@@ -1,7 +1,7 @@
-import {type EasingDescriptor, resolveEasing} from "./easing.js";
-import type {Seconds} from "./types.js";
-import {checkNumber} from "./utils/validation.js";
-import type {Stagger} from "./playback-options.js";
+import {type EasingDescriptor, resolveEasing} from "./easing.ts";
+import type {Seconds} from "./types.ts";
+import {checkNumber} from "./utils/validation.ts";
+import type {Stagger} from "./playback-options.ts";
 
 type StaggerOrigin = 'first' | 'last' | 'center' | number;
 

@@ -1,16 +1,16 @@
 import {describe, expect, it} from "vitest";
-import {AnimationTiming} from "../src/animation.js";
-import {CubicBezierEasing, type EasingFunction, linear, StepsEasing} from "../src/easing.js";
-import {PropertyStops, type NumericValueStops} from "../src/resolution/stops.js";
-import {layoutOf, type EntryPath, type SequenceLayout} from "../src/resolution/layout.js";
-import {SequenceTiming} from "../src/sequence.js";
-import type {AnimationPlaybackOptions, RepeatOptions} from "../src/playback-options.js";
-import type {TransitionOptions} from "../src/transition.js";
-import {lerp} from "../src/utils/math.js";
-import type {NativeAnimationEffect, NativeKeyframe} from "../src/waapi/native-effects.js";
-import {cssEasingOf, type NativeEasing} from "../src/waapi/native-easing.js";
-import type {CSSValueResolver} from "../src/waapi/effect-chains.js";
-import {type AnimationTracks, AnimationTracksResolver, type ElementValues} from "../src/waapi/tracks.js";
+import {AnimationTiming} from "../src/animation.ts";
+import {CubicBezierEasing, type EasingFunction, linear, StepsEasing} from "../src/easing.ts";
+import {PropertyStops, type NumericValueStops} from "../src/resolution/stops.ts";
+import {layoutOf, type EntryPath, type SequenceLayout} from "../src/resolution/layout.ts";
+import {SequenceTiming} from "../src/sequence.ts";
+import type {AnimationPlaybackOptions, RepeatOptions} from "../src/playback-options.ts";
+import type {TransitionOptions} from "../src/transition.ts";
+import {lerp} from "../src/utils/math.ts";
+import type {NativeAnimationEffect, NativeKeyframe} from "../src/waapi/native-effects.ts";
+import {cssEasingOf, type NativeEasing} from "../src/waapi/native-easing.ts";
+import type {CSSValueResolver} from "../src/waapi/effect-chains.ts";
+import {type AnimationTracks, AnimationTracksResolver, type ElementValues} from "../src/waapi/tracks.ts";
 
 const element = {} as Element;
 const line = {x: {0: 0, 1: 1}};

@@ -1,10 +1,10 @@
 import {describe, expect, it} from "vitest";
-import {AnimationTiming} from "../src/animation.js";
-import {type At, parsePositionDescriptor, resolvePosition} from "../src/at.js";
-import {animation, sequence} from "../src/definitions.js";
-import {layoutOf, type SequenceLayout} from "../src/resolution/layout.js";
-import {SequenceTiming} from "../src/sequence.js";
-import {progressStopsOf, resolveTargets} from "../src/dom/mapping.js";
+import {AnimationTiming} from "../src/animation.ts";
+import {type At, parsePositionDescriptor, resolvePosition} from "../src/at.ts";
+import {animation, sequence} from "../src/definitions.ts";
+import {layoutOf, type SequenceLayout} from "../src/resolution/layout.ts";
+import {SequenceTiming} from "../src/sequence.ts";
+import {progressStopsOf, resolveTargets} from "../src/dom/mapping.ts";
 
 const second = AnimationTiming.of({duration: 1});
 

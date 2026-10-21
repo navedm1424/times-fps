@@ -1,11 +1,11 @@
-import type {AnimationTiming} from "../animation.js";
-import {layoutOf, entryPathOf, type EntryPath} from "../resolution/layout.js";
-import {SequenceTiming} from "../sequence.js";
-import {AnimationControls} from "./controls.js";
-import {domValueResolver, keyframePropertyOf, resolveElementValues} from "./css-values.js";
-import {type AnimationMapping, type MappingTree, type PlayOptions, resolveTargets, type SequenceMappingNode} from "../dom/mapping.js";
-import {cssEasingOf} from "./native-easing.js";
-import {type AnimationTracks, AnimationTracksResolver, type ElementValues} from "./tracks.js";
+import type {AnimationTiming} from "../animation.ts";
+import {layoutOf, entryPathOf, type EntryPath} from "../resolution/layout.ts";
+import {SequenceTiming} from "../sequence.ts";
+import {AnimationControls} from "./controls.ts";
+import {domValueResolver, keyframePropertyOf, resolveElementValues} from "./css-values.ts";
+import {type AnimationMapping, type MappingTree, type PlayOptions, resolveTargets, type SequenceMappingNode} from "../dom/mapping.ts";
+import {cssEasingOf} from "./native-easing.ts";
+import {type AnimationTracks, AnimationTracksResolver, type ElementValues} from "./tracks.ts";
 
 /** Each animation leaf's values, and the path its animations are named by. */
 interface Leaves {

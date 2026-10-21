@@ -1,9 +1,9 @@
-import type {AnimationTiming} from "../animation.js";
-import {type EntrySpan, resolvePosition} from "../at.js";
-import {SequenceTiming} from "../sequence.js";
-import type {Seconds} from "../types.js";
-import {checkNumber} from "../utils/validation.js";
-import type {RepeatOptions, Stagger} from "../playback-options.js";
+import type {AnimationTiming} from "../animation.ts";
+import {type EntrySpan, resolvePosition} from "../at.ts";
+import {SequenceTiming} from "../sequence.ts";
+import type {Seconds} from "../types.ts";
+import {checkNumber} from "../utils/validation.ts";
+import type {RepeatOptions, Stagger} from "../playback-options.ts";
 
 /** An animation leaf's key in a sequence: the names of the entries leading to it, joined by `>`. */
 export type EntryPath = string;

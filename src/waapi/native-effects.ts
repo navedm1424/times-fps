@@ -1,15 +1,15 @@
-import type {CubicBezier} from "../cubic-bezier.js";
-import {CubicBezierEasing, type CubicBezierEasingDescriptor, type EasingFunction, LinearEasing, linear, SpringEasing, StepsEasing} from "../easing.js";
-import type {DampedSpring} from "../damped-spring.js";
-import type {PropertyStops, StopValue} from "../resolution/stops.js";
-import type {EntryPath} from "../resolution/layout.js";
-import type {TrackRun, TrackSpan} from "../resolution/track-runs.js";
-import type {Progress, Seconds} from "../types.js";
-import {invLerp, lerp} from "../utils/math.js";
-import {sortedByKey} from "../utils/records.js";
-import type {LinearPoint, NativeEasing} from "./native-easing.js";
-import {type Spline, SpringSplineFitter} from "./spring-fit.js";
-import type {PlacedEffect, ResolvedEffect} from "./tracks.js";
+import type {CubicBezier} from "../cubic-bezier.ts";
+import {CubicBezierEasing, type CubicBezierEasingDescriptor, type EasingFunction, LinearEasing, linear, SpringEasing, StepsEasing} from "../easing.ts";
+import type {DampedSpring} from "../damped-spring.ts";
+import type {PropertyStops, StopValue} from "../resolution/stops.ts";
+import type {EntryPath} from "../resolution/layout.ts";
+import type {TrackRun, TrackSpan} from "../resolution/track-runs.ts";
+import type {Progress, Seconds} from "../types.ts";
+import {invLerp, lerp} from "../utils/math.ts";
+import {sortedByKey} from "../utils/records.ts";
+import type {LinearPoint, NativeEasing} from "./native-easing.ts";
+import {type Spline, SpringSplineFitter} from "./spring-fit.ts";
+import type {PlacedEffect, ResolvedEffect} from "./tracks.ts";
 
 /** `easing` leads to the next keyframe; without one, it's linear. The value is CSS text. */
 export interface NativeKeyframe {

@@ -1,4 +1,4 @@
-import type {Seconds} from "../types.js";
+import type {Seconds} from "../types.ts";
 
 /** Plays, pauses and seeks the native animations of one definition together. */
 export class AnimationControls {

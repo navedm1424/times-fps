@@ -1,8 +1,8 @@
-import {PRECISION} from "./constants.js";
-import {DampedSpring} from "./damped-spring.js";
-import {type EasingDescriptor, type EasingFunction, linear, resolveEasing, SpringEasing} from "./easing.js";
-import type {Progress, Seconds} from "./types.js";
-import {checkNumber, checkPositive} from "./utils/validation.js";
+import {PRECISION} from "./constants.ts";
+import {DampedSpring} from "./damped-spring.ts";
+import {type EasingDescriptor, type EasingFunction, linear, resolveEasing, SpringEasing} from "./easing.ts";
+import type {Progress, Seconds} from "./types.ts";
+import {checkNumber, checkPositive} from "./utils/validation.ts";
 
 type ElementOf<A extends readonly string[]> = A extends readonly (infer Element)[] ? Element : never;
 

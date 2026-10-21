@@ -1,6 +1,6 @@
-import {AnimationTiming, type AnimationTimingDescriptor, type TimedTweenTiming} from "./animation.js";
-import {type At, checkPositionDescriptor, parsePositionDescriptor, type PositionDescriptor} from "./at.js";
-import {checkPlaybackOptions, clampedDelay, clampedRepeats, type SequencePlaybackOptions} from "./playback-options.js";
+import {AnimationTiming, type AnimationTimingDescriptor, type TimedTweenTiming} from "./animation.ts";
+import {type At, checkPositionDescriptor, parsePositionDescriptor, type PositionDescriptor} from "./at.ts";
+import {checkPlaybackOptions, clampedDelay, clampedRepeats, type SequencePlaybackOptions} from "./playback-options.ts";
 
 export interface AnimationTimingEntry<N extends string = string> {
     timing: AnimationTiming;

@@ -1,7 +1,7 @@
-import {type EasingFunction, linear} from "../easing.js";
-import type {Progress, Seconds} from "../types.js";
-import {PropertyStops, type StopValue} from "./stops.js";
-import type {RepeatOptions} from "../playback-options.js";
+import {type EasingFunction, linear} from "../easing.ts";
+import type {Progress, Seconds} from "../types.ts";
+import {PropertyStops, type StopValue} from "./stops.ts";
+import type {RepeatOptions} from "../playback-options.ts";
 
 /** A stretch of a track whose value follows the stops through the easing. */
 export interface TrackSpan {

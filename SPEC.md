@@ -32,6 +32,7 @@ Native animations (WAAPI and CSS) run without JavaScript per frame, but they lea
 
 - **Adapters for Motion and GSAP.** The same timing and choreography run on either library by changing one parameter, possibly per entry.
 - **A readonly sequence tree,** so callers and adapters can read particular entries.
+- **Motion-style React components,** so animations can be declared on the component. 
 - **Other engines,** later.
 - **The focus now** is DOM-based animations played with WAAPI.
 
@@ -343,7 +344,7 @@ interface PositionDescriptor<Name> {
 
 `checkPositionDescriptor`, next to the parser, then throws an `Error` for a reference to a name that isn't an earlier entry, and a `RangeError` for any offset that isn't finite (`'+Infinity'`).
 
-**The type.** `At<Name>` is a template literal type over the names given so far, so positions can only refer to earlier names. Its offsets are three optional slots in their order, so the type rejects repeated and out-of-order offsets too.
+**The type.** `At<Name>` is a template literal type over the names given so far, so positions can only refer to earlier names. `Name` defaults to `string`, so a bare `At` takes any name. Its offsets are three optional slots in their order, so the type rejects repeated and out-of-order offsets too.
 
 #### 2.7.2 Reach
 
@@ -611,6 +612,7 @@ Every error has the type of what went wrong:
 | `src/at.ts` | `At`, `PositionDescriptor`, `parsePositionDescriptor`, `checkPositionDescriptor` and `resolvePosition` |
 | `src/sequence.ts` | `SequenceTimingBuilder`, `SequenceTiming` and its entries, with validation and clamping |
 | `src/definitions.ts` | `animation`, `sequence`, `AnimationDefinition`, `SequenceDefinition`, `SequenceDefinitionBuilder`, and splitting timings per property |
+| `src/internals.ts` | The internals `site/` uses, which it imports as `timesfps/internals`; `tsconfig.json` leaves it out of the build |
 | `src/utils/validation.ts` | `checkNumber` and `checkPositive` |
 | `src/utils/math.ts` | Interpolation and solving monotone functions |
 | `src/utils/records.ts` | Reading numeric-keyed records in order |
@@ -627,7 +629,9 @@ Every error has the type of what went wrong:
 | `src/waapi/native-easing.ts` | `NativeEasing` and its CSS form |
 | `src/waapi/spring-fit.ts` | Fitting a spring easing with cubic Bézier segments |
 
-`spring-fit-visualizer/` is a page for checking spring fits by eye, and `site/` is the demo site.
+Relative imports end in `.ts`, and `rewriteRelativeImportExtensions` makes the build emit `.js`. Turbopack doesn't map `.js` imports to `.ts` files, so this is what lets the site load the source.
+
+`site/` is the demo site. Its `tsconfig.json` aliases `timesfps` to `src/index.ts` and `timesfps/internals` to `src/internals.ts`, so it runs the library's source with one copy of every class, which the library's `instanceof` checks need. Its spring page checks spring fits by eye: the fitted spline, and the keyframes the adapter plays, each against the spring.
 
 ## 5. Adaptation flow
 
@@ -814,7 +818,9 @@ The cases cover single animations, sequence loops, reverses and mirrors with off
 
 `tests/animation.test.ts` covers timings: validation and clamping, telling transition kinds apart, splitting descriptors, the `DampedSpring` factories, and staggers. `tests/sequence.test.ts` covers positions (parsing, one offset of each kind in order, and resolving every reference and share), sequence timings, targets, value forms, and definitions: naming, immutability, property splits and mapping trees.
 
-Effect chains are tested through a stand-in `CSSValueResolver` that takes plain numbers and gives every property a current value of 0.25. The DOM-dependent parts (targets, `domValueResolver`, probes and `element.animate`) have no tests yet, because the tests run without a DOM.
+Effect chains are tested through a stand-in `CSSValueResolver` that takes plain numbers and gives every property a current value of 0.25. The tests run without a DOM. `tests/play.test.ts` plays definitions on a stand-in one and checks the animations' ids and staggered delays, but `domValueResolver`, probes and real elements have no tests yet.
+
+`tests/readme-examples.test-d.ts` type-checks the README's examples, and the mistakes the README says the types reject. `npm test` runs it through Vitest's type checking, with `tests/tsconfig.json`, which includes the type tests.
 
 ## 8. Limitations and open work
 

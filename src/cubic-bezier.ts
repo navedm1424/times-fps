@@ -1,4 +1,4 @@
-import {lerp, solveMonotone} from "./utils/math.js";
+import {lerp, solveMonotone} from "./utils/math.ts";
 
 export interface Point {
     x: number;

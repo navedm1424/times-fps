@@ -1,8 +1,8 @@
-import {PropertyStops} from "../resolution/stops.js";
-import {checkNumber} from "../utils/validation.js";
-import type {CSSValueResolver} from "./effect-chains.js";
-import {type AnimationValues, type CSSValue, progressStopsOf} from "../dom/mapping.js";
-import type {ElementValues} from "./tracks.js";
+import {PropertyStops} from "../resolution/stops.ts";
+import {checkNumber} from "../utils/validation.ts";
+import type {CSSValueResolver} from "./effect-chains.ts";
+import {type AnimationValues, type CSSValue, progressStopsOf} from "../dom/mapping.ts";
+import type {ElementValues} from "./tracks.ts";
 
 /** The CSS name of a property given in camelCase; a custom property is already given by it. */
 export function cssPropertyNameOf(property: string): string {

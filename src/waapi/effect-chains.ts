@@ -1,7 +1,7 @@
-import type {PropertyStops, StopValue} from "../resolution/stops.js";
-import type {Seconds} from "../types.js";
-import {landsOnStops} from "./native-effects.js";
-import type {PlacedEffect, ResolvedEffect} from "./tracks.js";
+import type {PropertyStops, StopValue} from "../resolution/stops.ts";
+import type {Seconds} from "../types.ts";
+import {landsOnStops} from "./native-effects.ts";
+import type {PlacedEffect, ResolvedEffect} from "./tracks.ts";
 
 /** What resolving values needs from the page. */
 export interface CSSValueResolver {

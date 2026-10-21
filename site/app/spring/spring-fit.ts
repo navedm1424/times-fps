@@ -1,14 +1,14 @@
-import {AnimationDefinition, type SpringTransition} from "timesfps";
+import {AnimationTiming, type SpringTransitionOptions} from "timesfps";
 import {
     AnimationTracksResolver,
-    type CubicBezierEasing,
+    CubicBezierEasing,
+    layoutOf,
+    type NativeKeyframe,
     plainNumberResolver,
     PropertyStops,
-    resolveSpring,
-    resolveTimings,
-    SpringEasing,
     SpringSplineFitter
-} from "@/lib/timesfps-internals";
+} from "timesfps/internals";
+import {springEasingOf} from "./spring-parameters";
 
 export interface SplinePoint {
     time: number;
@@ -27,44 +27,79 @@ export interface SpringFit {
     times: number[];
     springProgresses: number[];
     splineProgresses: number[];
+    /** What WAAPI plays from the adapter's keyframes. */
+    keyframeProgresses: number[];
     /** The spline's progress minus the spring's. */
-    errors: number[];
-    largestError: number;
+    splineErrors: number[];
+    largestSplineError: number;
+    /** The keyframes' progress minus the spring's. */
+    keyframeErrors: number[];
+    largestKeyframeError: number;
 }
 
 const sampleCount = 600;
 
-export function fitSpring(transition: SpringTransition): SpringFit {
-    const {spring, duration} = resolveSpring(transition);
-    const splinePoints = Object.entries(SpringSplineFitter.fit(new SpringEasing(spring, duration)))
+export function fitSpring(transition: SpringTransitionOptions): SpringFit {
+    const easing = springEasingOf(transition);
+    const {spring, duration} = easing;
+    const splinePoints = Object.entries(SpringSplineFitter.fit(easing))
         .map(([offset, point]) => ({time: Number(offset) * duration, ...point}))
         .sort((first, second) => first.time - second.time);
 
     const times = Array.from({length: sampleCount + 1}, (_, index) => duration * index / sampleCount);
     const springProgresses = times.map(time => spring.positionAt(time));
     const splineProgresses = times.map(time => splineProgressAt(splinePoints, time));
-    const errors = splineProgresses.map((progress, index) => progress - springProgresses[index]!);
+    const keyframes = keyframesOf(transition);
+    const keyframeProgressAt = keyframePlaybackOf(keyframes, duration);
+    const keyframeProgresses = times.map(keyframeProgressAt);
+    const splineErrors = splineProgresses.map((progress, index) => progress - springProgresses[index]!);
+    const keyframeErrors = keyframeProgresses.map((progress, index) => progress - springProgresses[index]!);
     return {
         duration,
         naturalFrequency: spring.naturalFrequency,
         dampingRatio: spring.dampingRatio,
         splinePoints,
-        keyframeCount: keyframeCountOf(transition),
+        keyframeCount: keyframes.length,
         times,
         springProgresses,
         splineProgresses,
-        errors,
-        largestError: Math.max(...errors.map(Math.abs))
+        keyframeProgresses,
+        splineErrors,
+        largestSplineError: Math.max(...splineErrors.map(Math.abs)),
+        keyframeErrors,
+        largestKeyframeError: Math.max(...keyframeErrors.map(Math.abs))
     };
 }
 
-/** The resolver only keys its tracks by target, so a plain object stands in for an element, which the server doesn't have. */
-const standInTarget = {} as Element;
+/** The resolver only keys its tracks by element, so a plain object stands in for one, which the server doesn't have. */
+const standInElement = {} as Element;
 
-function keyframeCountOf(transition: SpringTransition): number {
-    const targetValues = [{target: standInTarget, properties: {progress: {stops: PropertyStops.of("progress", {0: 0, 1: 1}), allowedFill: "both" as const}}}];
-    const tracks = AnimationTracksResolver.resolve(resolveTimings(AnimationDefinition.of(transition), 1), () => targetValues, plainNumberResolver);
-    return tracks.get(standInTarget)!.progress!.reduce((count, effect) => count + effect.keyframes.length, 0);
+/** The keyframes the WAAPI adapter plays the spring as, from 0 to 1. */
+function keyframesOf(transition: SpringTransitionOptions): readonly NativeKeyframe[] {
+    const elementValues = [{element: standInElement, properties: {progress: PropertyStops.of("progress", {0: 0, 1: 1})}}];
+    const tracks = AnimationTracksResolver.resolve(layoutOf(AnimationTiming.of(transition), 1), () => elementValues, plainNumberResolver);
+    const [effect, ...others] = tracks.get(standInElement)!.progress!;
+    if (!effect || others.length > 0) throw new Error("A spring on its own should play as one effect.");
+    return effect.keyframes;
+}
+
+/** Plays the keyframes the way WAAPI does: each keyframe's easing runs to the next keyframe. */
+function keyframePlaybackOf(keyframes: readonly NativeKeyframe[], duration: number): (time: number) => number {
+    const curves = keyframes.map(({easing}) => {
+        if (!easing || easing.type === "linear") return undefined;
+        if (easing.type === "cubic-bezier") return new CubicBezierEasing(easing.definition);
+        throw new Error(`The keyframes ease with ${easing.type}, which the fit can't play.`);
+    });
+    return time => {
+        const offset = time / duration;
+        const nextIndex = keyframes.findIndex(keyframe => keyframe.offset >= offset);
+        const index = nextIndex === -1 ? keyframes.length - 1 : Math.max(1, nextIndex);
+        const from = keyframes[index - 1]!;
+        const to = keyframes[index]!;
+        const localOffset = to.offset > from.offset ? (offset - from.offset) / (to.offset - from.offset) : 1;
+        const easedProgress = curves[index - 1]?.progressAt(localOffset) ?? localOffset;
+        return Number(from.value) + (Number(to.value) - Number(from.value)) * easedProgress;
+    };
 }
 
 /** Each segment's easing runs between its two points, as WAAPI plays an easing between two keyframes. */

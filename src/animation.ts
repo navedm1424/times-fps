@@ -1,14 +1,14 @@
-import type {EasingFunction} from "./easing.js";
+import type {EasingFunction} from "./easing.ts";
 import {
     type AnimationPlaybackOptions,
     checkPlaybackOptions,
     clampedDelay,
     clampedRepeats,
     type RepeatOptions
-} from "./playback-options.js";
-import {checkTransitionOptions, isTransitionKey, resolveTransition, type TransitionOptions} from "./transition.js";
-import type {Seconds} from "./types.js";
-import {checkNumber} from "./utils/validation.js";
+} from "./playback-options.ts";
+import {checkTransitionOptions, isTransitionKey, resolveTransition, type TransitionOptions} from "./transition.ts";
+import type {Seconds} from "./types.ts";
+import {checkNumber} from "./utils/validation.ts";
 
 /** A transition with the options of its timing spread into it. */
 export type AnimationTimingDescriptor = TransitionOptions & AnimationPlaybackOptions;

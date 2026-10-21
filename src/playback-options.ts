@@ -1,5 +1,5 @@
-import type {Seconds} from "./types.js";
-import {checkNumber} from "./utils/validation.js";
+import type {Seconds} from "./types.ts";
+import {checkNumber} from "./utils/validation.ts";
 
 export type Stagger = (index: number, total: number) => Seconds;
 export type RepeatMode = 'loop' | 'reverse' | 'mirror';

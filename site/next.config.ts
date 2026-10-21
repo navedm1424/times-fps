@@ -6,7 +6,7 @@ const nextConfig: NextConfig = {
   cacheComponents: true,
   partialPrefetching: true,
   turbopack: {
-    // The site imports the library's build output from the repository root.
+    // The site imports the library's source from the repository root.
     root: path.join(__dirname, ".."),
     rules: {
       "*.css": {

@@ -1,5 +1,5 @@
-import type {Seconds} from "./types.js";
-import {checkNumber} from "./utils/validation.js";
+import type {Seconds} from "./types.ts";
+import {checkNumber} from "./utils/validation.ts";
 
 type AnchorMark = '<' | '>';
 type AtPoint<Name extends string> = '' | AnchorMark | Name | `${Name}${AnchorMark}` | '<<' | '>>';
@@ -15,7 +15,7 @@ type AtSelfPercentageOffset = `${AtOffsetSign}=${number}%`;
  * The offsets are a share of the reference duration (`%`), a share of the inserted entry's duration (`=%`), and seconds, each with a sign.
  * A number is the same as `<<` with that offset in seconds.
  */
-export type At<Name extends string> =
+export type At<Name extends string = string> =
     | Seconds
     | `${AtPoint<Name>}${AtReferencePercentageOffset | ""}${AtSelfPercentageOffset | ""}${AtSecondsOffset | ""}`;
 

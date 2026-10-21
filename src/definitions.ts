@@ -1,10 +1,10 @@
-import {AnimationTiming, type AnimationTimingDescriptor} from "./animation.js";
-import type {At} from "./at.js";
-import {SequenceTiming, type SequenceTimingBuilder, type SequenceTimingEntries} from "./sequence.js";
-import type {SequencePlaybackOptions} from "./playback-options.js";
-import {WAAPIAnimator} from "./waapi/animator.js";
-import type {AnimationControls} from "./waapi/controls.js";
-import {type AnimationMapping, type AnimationValues, type MappingTree, type SequenceMapping, type PlayOptions, type SequenceMappingNode, type Target} from "./dom/mapping.js";
+import {AnimationTiming, type AnimationTimingDescriptor} from "./animation.ts";
+import type {At} from "./at.ts";
+import {SequenceTiming, type SequenceTimingBuilder, type SequenceTimingEntries} from "./sequence.ts";
+import type {SequencePlaybackOptions} from "./playback-options.ts";
+import {WAAPIAnimator} from "./waapi/animator.ts";
+import type {AnimationControls} from "./waapi/controls.ts";
+import {type AnimationMapping, type AnimationValues, type MappingTree, type SequenceMapping, type PlayOptions, type SequenceMappingNode, type Target} from "./dom/mapping.ts";
 
 /** A timing for each property of the values. */
 export type PropertyTimings<Values extends AnimationValues> = {

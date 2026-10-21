@@ -1,6 +1,6 @@
-import type {Progress} from "../types.js";
-import {remap} from "../utils/math.js";
-import {sortedByKey} from "../utils/records.js";
+import type {Progress} from "../types.ts";
+import {remap} from "../utils/math.ts";
+import {sortedByKey} from "../utils/records.ts";
 
 export type NumericValueStops = {
     [progress: number]: number;

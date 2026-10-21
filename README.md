@@ -1,4 +1,4 @@
-## timesfps
+## TimesFPS
 
 `timesfps` is a TypeScript library for designing animations that play natively in the browser.
 
@@ -326,19 +326,19 @@ An entry's `at` says when it starts: a **reference point**, then up to three **o
 - **A number** is seconds from the start of the sequence: `1.5` is the same as `'<<+1.5'`.
 - **Offsets add up.** `'<+50%-=50%+0.1'` centres this entry halfway through the previous one, then moves it 0.1 seconds later.
 
-| Position | Starts |
-|---|---|
-| `1.5` | 1.5 seconds after the sequence starts |
-| `'+0.2'` | 0.2 seconds after the previous entry ends |
-| `'<-0.1'` | 0.1 seconds before the previous entry starts |
-| `'title+0.2'` | 0.2 seconds after `title` ends |
-| `'<+25%'` | a quarter of the way through the previous entry |
-| `'-25%'` | a quarter of the previous entry before it ends, the same as `'<+75%'` |
-| `'title<+50%'` | halfway through `title` |
+| Position | Starts                                                                     |
+|---|----------------------------------------------------------------------------|
+| `1.5` | 1.5 seconds after the sequence starts, the same as `<<+1.5`                |
+| `'+0.2'` | 0.2 seconds after the previous entry ends                                  |
+| `'<-0.1'` | 0.1 seconds before the previous entry starts                               |
+| `'title+0.2'` | 0.2 seconds after `title` ends                                             |
+| `'<+25%'` | a quarter of the way through the previous entry                            |
+| `'-25%'` | a quarter of the previous entry before it ends, the same as `'<+75%'`      |
+| `'title<+50%'` | halfway through `title`                                                    |
 | `'<<+50%'` | halfway between the start of the sequence and the end of everything so far |
-| `'>>-25%'` | a quarter of that time before everything so far ends |
-| `'-=25%'` | a quarter of **this** entry before the previous entry ends |
-| `'>>+=10%'` | a tenth of **this** entry after everything so far has ended |
+| `'>>-25%'` | a quarter of that time before everything so far ends                       |
+| `'-=25%'` | a quarter of **this** entry before the previous entry ends                 |
+| `'>>+=10%'` | a tenth of **this** entry after everything so far has ended                |
 
 **Rules.**
 

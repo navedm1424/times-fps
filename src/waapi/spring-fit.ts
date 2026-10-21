@@ -1,7 +1,7 @@
-import type {Progress, Seconds} from "../types.js";
-import {lerp} from "../utils/math.js";
-import {PRECISION} from "../constants.js";
-import {CubicBezierEasing, type SpringEasing} from "../easing.js";
+import type {Progress, Seconds} from "../types.ts";
+import {lerp} from "../utils/math.ts";
+import {PRECISION} from "../constants.ts";
+import {CubicBezierEasing, type SpringEasing} from "../easing.ts";
 
 /** Keyed by the offset at which the spring is broken; `easing` leads from the previous point. */
 export type Spline = {

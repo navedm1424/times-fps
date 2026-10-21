@@ -1,4 +1,4 @@
-import {progressPrecision} from "@/lib/timesfps-internals";
+import {PRECISION} from "timesfps/internals";
 import type {SpringFit} from "./spring-fit";
 
 export function FitStats({fit}: { fit: SpringFit }) {
@@ -8,8 +8,9 @@ export function FitStats({fit}: { fit: SpringFit }) {
         ["ζ", fit.dampingRatio.toFixed(4)],
         ["spline segments", String(fit.splinePoints.length - 1)],
         ["keyframes", String(fit.keyframeCount)],
-        ["largest |spline − spring|", fit.largestError.toExponential(2)],
-        ["progressPrecision", String(progressPrecision)]
+        ["largest |spline − spring|", fit.largestSplineError.toExponential(2)],
+        ["largest |keyframes − spring|", fit.largestKeyframeError.toExponential(2)],
+        ["PRECISION", String(PRECISION)]
     ];
 
     return (

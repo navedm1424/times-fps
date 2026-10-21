@@ -1,10 +1,10 @@
-import type {PropertyStops} from "../resolution/stops.js";
-import {type AnimationLayout, entryPathOf, type EntryPath, type LayoutNode, type SequenceLayout} from "../resolution/layout.js";
-import {TrackRun} from "../resolution/track-runs.js";
-import type {Seconds} from "../types.js";
-import {type CSSValueResolver, resolveEffectChains} from "./effect-chains.js";
-import {type NativeAnimationEffect, nativeEffectOf} from "./native-effects.js";
-import type {RepeatOptions} from "../playback-options.js";
+import type {PropertyStops} from "../resolution/stops.ts";
+import {type AnimationLayout, entryPathOf, type EntryPath, type LayoutNode, type SequenceLayout} from "../resolution/layout.ts";
+import {TrackRun} from "../resolution/track-runs.ts";
+import type {Seconds} from "../types.ts";
+import {type CSSValueResolver, resolveEffectChains} from "./effect-chains.ts";
+import {type NativeAnimationEffect, nativeEffectOf} from "./native-effects.ts";
+import type {RepeatOptions} from "../playback-options.ts";
 
 /** An element of an animation, with each property's stops. */
 export interface ElementValues {
