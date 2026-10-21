@@ -43,7 +43,7 @@ animation('.card', {opacity: [0, 1], scale: [0.95, 1]}, {duration: 0.4, easing: 
 // A springy pulse that ripples out from the middle dot, forever.
 animation('.dot', {scale: [1, 1.4]}, {
     visualDuration: 0.3, bounce: 0.4,
-    delay: stagger({each: 0.05, from: 'center'}),
+    delay: stagger({step: 0.05, from: 'center'}),
     repeat: Infinity, repeatMode: 'mirror', repeatDelay: 0.6
 }).play();
 
@@ -59,7 +59,7 @@ sequence()
 const cards = sequence()
     .add('.card', {translate: [40, 0]}, {duration: 0.6, bounce: 0.2}, {name: 'lift'})
     .add('.card .icon', {opacity: [0, 1]}, {duration: 0.3}, {at: 'lift<+25%'})
-    .build({delay: stagger({each: 0.1})});
+    .build({delay: stagger({step: 0.1})});
 
 cards.play({scope: featuredList});
 cards.play({scope: archiveList});
@@ -86,12 +86,12 @@ It returns an `AnimationDefinition`. Nothing is looked up or read until you call
 | Target | Example |
 |---|---|
 | One element | `animation(heading, …)` |
-| Several elements | `animation([first, second], …)` |
+| Several elements: an array, a `NodeList` or any other iterable | `animation([first, second], …)` |
 | A CSS selector, looked up in the scope | `animation('.card', …)` |
 | A function that finds elements in the scope | `animation(scope => scope.querySelectorAll('li'), …)` |
 
 - The **scope** is the element you pass to `play({scope})`. It defaults to `document.documentElement`.
-- A function can return one element or an array of them.
+- A function can return one element, or any iterable of them, such as an array or a `NodeList`.
 - Each element is animated once, even if the target lists it twice.
 - A target that matches no elements throws when you play.
 
@@ -162,7 +162,7 @@ animation('.card', {'--y': {0: '20px', 1: '0px'}}, {duration: 0.6, bounce: 0.2})
 
 ### Timing
 
-The third argument is the timing: a **transition**, which shapes one play, with the **timing options** spread into it.
+The third argument is the timing: a **transition**, which shapes one play, with the **playback options** spread into it.
 
 ```ts
 {duration: 0.4, easing: 'easeOut', delay: 0.1, repeat: 2, repeatMode: 'reverse'}
@@ -239,19 +239,21 @@ A stagger gives each element its own delay, from its index among the target's el
 ```ts
 import {stagger} from "timesfps";
 
-stagger({each: 0.05})                                 // 0, 0.05, 0.1, …
-stagger({amount: 0.4, from: 'center'})                // the farthest elements wait 0.4 s
-stagger({each: 0.05, from: 'last', easing: 'easeOut'})
+stagger({step: 0.05})                     // 0, 0.05, 0.1, …
+stagger({spread: 0.4, from: 'center'})    // the farthest elements wait 0.4 s
+stagger({step: 0.05, startDelay: 0.2})    // 0.2, 0.25, 0.3, …
+stagger({step: 0.05, from: 'last', easing: 'easeOut'})
 ```
 
 | Option | Meaning |
 |---|---|
-| `each` | Seconds between neighbouring elements. |
-| `amount` | Seconds the farthest element waits. Give either `each` or `amount`. |
-| `from` | Where the stagger starts: `'first'` (the default), `'last'`, `'center'`, or an index. |
+| `step` | Seconds between neighbouring elements. |
+| `spread` | Seconds the farthest element waits after the first. Give either `step` or `spread`. |
+| `startDelay` | Seconds the first element waits, added to every delay. `0` by default. |
+| `from` | Which element goes first: `'first'` (the default), `'last'`, `'center'`, or an index. |
 | `easing` | Spreads the delays along an easing instead of evenly. |
 
-A stagger is just a function `(index, total) => seconds`, so you can pass your own as `delay` too. `each`, `amount` and an index `from` must be finite numbers.
+A stagger is just a function `(index, total) => seconds`, so you can pass your own as `delay` too. `step`, `spread`, `startDelay` and an index `from` must be finite numbers. A delay that comes out negative becomes 0.
 
 #### A timing for each property
 
@@ -274,14 +276,14 @@ The properties start together, and each runs on its own timing.
 sequence()
     .add(target, values, timing, placement?)
     .add(definition, placement?)
-    .build(timingOptions?)
+    .build(playbackOptions?)
 ```
 
 A sequence lays **entries** out in time. An entry is an animation, written inline or as an `animation()` definition, or another sequence.
 
 - **Inline:** `add(target, values, timing, placement?)` takes the same arguments as `animation()`, and the entry's placement: `{name?, at?}`.
 - **A definition:** `add(definition, placement?)` takes an `animation()` definition or a built sequence, with `{name?, at?}`.
-- **`build(timingOptions?)`** gives you a `SequenceDefinition`. It takes the sequence's own `delay`, which can be a stagger, and its repeat options.
+- **`build(playbackOptions?)`** gives you a `SequenceDefinition`. It takes the sequence's own `delay`, which can be a stagger, and its repeat options.
 
 ```ts
 const fadeIn = animation('.note', {opacity: [0, 1]}, {duration: 0.3});
@@ -302,52 +304,58 @@ const intro = sequence()
 
 ### Positions
 
-An entry's `at` says when it starts. Positions are relative to the **previous entry** by default.
+An entry's `at` says when it starts: a **reference point**, then up to three **offsets** from it, one of each kind, in the order below. Positions are relative to the end of the **previous entry** by default.
 
-| Position | Starts |
+| Reference point | Starts |
 |---|---|
-| omitted | when the previous entry ends, the same as `'>'` |
-| `1.5` | 1.5 seconds after the sequence starts |
-| `'>'` | when the previous entry ends |
-| `'+0.2'` or `'>+0.2'` | 0.2 seconds after the previous entry ends |
-| `'-0.3'` or `'>-0.3'` | 0.3 seconds before the previous entry ends |
+| omitted, `''` or `'>'` | when the previous entry ends |
 | `'<'` | when the previous entry starts |
-| `'<+0.1'`, `'<-0.1'` | 0.1 seconds after or before the previous entry starts |
+| `'title'` or `'title>'` | when the entry named `title` ends |
+| `'title<'` | when the entry named `title` starts |
+| `'<<'` | when the sequence starts |
 | `'>>'` | when everything so far has ended |
-| `'>>+0.5'`, `'>>-0.5'` | 0.5 seconds after or before everything so far has ended |
-| `'title>'`, `'title+0.2'`, `'title>+0.2'` | relative to when the entry named `title` ends |
-| `'title<'`, `'title<+0.2'` | relative to when the entry named `title` starts |
 
-**Shares of an entry.** An offset can be a percentage instead of seconds.
+| Offset, in order | Moves it by |
+|---|---|
+| `+25%`, `-25%` | a share of the **reference duration** |
+| `+=25%`, `-=25%` | a share of **this** entry's duration |
+| `+0.2`, `-0.3` | seconds, later or earlier |
+
+- **The reference duration** is the referenced entry's duration, or, for `<<` and `>>`, the time from the start of the sequence until everything so far has ended.
+- **An entry's duration** runs from when it first starts to when it ends, repeats included.
+- **A number** is seconds from the start of the sequence: `1.5` is the same as `'<<+1.5'`.
+- **Offsets add up.** `'<+50%-=50%+0.1'` centres this entry halfway through the previous one, then moves it 0.1 seconds later.
 
 | Position | Starts |
 |---|---|
+| `1.5` | 1.5 seconds after the sequence starts |
+| `'+0.2'` | 0.2 seconds after the previous entry ends |
+| `'<-0.1'` | 0.1 seconds before the previous entry starts |
+| `'title+0.2'` | 0.2 seconds after `title` ends |
 | `'<+25%'` | a quarter of the way through the previous entry |
 | `'-25%'` | a quarter of the previous entry before it ends, the same as `'<+75%'` |
 | `'title<+50%'` | halfway through `title` |
-| `'>>-25%'` | a quarter of everything so far, before it ends |
+| `'<<+50%'` | halfway between the start of the sequence and the end of everything so far |
+| `'>>-25%'` | a quarter of that time before everything so far ends |
 | `'-=25%'` | a quarter of **this** entry before the previous entry ends |
-| `'<+=50%'` | half of **this** entry after the previous entry starts |
-| `'title+=10%'` | a tenth of **this** entry after `title` ends |
-
-- **`%`** is a share of the entry the position refers to.
-- **`=%`** is a share of the entry being added.
-- An entry's length, for shares, runs from when it first starts to when it ends, repeats included.
+| `'>>+=10%'` | a tenth of **this** entry after everything so far has ended |
 
 **Rules.**
 
-- The first entry's previous entry is the start of the sequence, and so is "everything so far".
+- Before the first entry, the previous entry and everything so far are the start of the sequence, with a duration of 0.
 - An entry that repeats forever counts as ending after its first play.
 - A position that lands before the start of the sequence starts at its start.
 
-**These throw** as the entry is added:
+**These throw** when you add the entry to a `SequenceTiming` builder, or when you build a `sequence()`:
 
 | Position | Why |
 |---|---|
 | `'+=1'` | `=` only goes with `%`. |
 | `'<0.2'` | Offsets need a sign: `'<+0.2'`. |
-| `'title'` | A name needs `<`, `>` or an offset after it. |
-| `'title>>'`, `'<<'` | Not positions. |
+| `'<+-1'`, `'>-+50%'` | A sign needs an amount after it. |
+| `'<+1-1'`, `'<+50%-25%'` | Two offsets of one kind: add them into one. |
+| `'<-1+50%'`, `'+=50%+50%'` | Offsets go in order: `%`, then `=%`, then seconds. |
+| `'title>>'`, `'title<<'` | `<<` and `>>` take no name. |
 | `'later<'` | `later` isn't an earlier entry. |
 | `'+abc'`, `'+Infinity'` | Not a finite number. |
 
@@ -381,7 +389,7 @@ A sequence's `delay` can be a stagger. The sequence then plays once for each ele
 sequence()
     .add('.card', {scale: [1, 1.05]}, {duration: 0.3}, {name: 'lift'})
     .add('.card .icon', {opacity: [0, 1]}, {duration: 0.5})
-    .build({delay: stagger({each: 0.1})})
+    .build({delay: stagger({step: 0.1})})
     .play();
 ```
 
@@ -415,7 +423,7 @@ animation('.card', {translate: [40, 0]}, rise);
 animation('.panel', {opacity: [0, 1]}, rise);
 ```
 
-`AnimationTiming.of(transition, timingOptions?)` checks everything as soon as you call it, so mistakes throw where you make them. It goes wherever a timing does: as `animation()`'s timing, as an inline entry's timing, or as one property's timing.
+`AnimationTiming.of(transition, playbackOptions?)` checks everything as soon as you call it, so mistakes throw where you make them. It goes wherever a timing does: as `animation()`'s timing, as an inline entry's timing, or as one property's timing.
 
 ### `SequenceTiming`
 
@@ -432,7 +440,7 @@ const reveal = SequenceTiming.builder()
 ```
 
 - **`add(name, timing, at?)`**: the name is required, because the mapping refers to entries by it. The timing is an `AnimationTiming`, a transition with its options, or another `SequenceTiming`. Positions work as in `sequence()`.
-- **`build(timingOptions?)`** takes the same options as a sequence's `build`.
+- **`build(playbackOptions?)`** takes the same options as a sequence's `build`.
 - Builders are immutable here too.
 
 To play it, give `sequence()` the timing and a **mapping** of the same shape, keyed by entry name. Each node takes `target` and `values`, and a nested sequence timing takes a nested mapping:
@@ -485,7 +493,7 @@ const controls = definition.play({scope});
 animate('.card', {opacity: [0, 1]}, {type: 'spring', duration: 0.6, bounce: 0.2, delay: stagger(0.1)});
 
 // timesfps
-animation('.card', {opacity: [0, 1]}, {duration: 0.6, bounce: 0.2, delay: stagger({each: 0.1})}).play();
+animation('.card', {opacity: [0, 1]}, {duration: 0.6, bounce: 0.2, delay: stagger({step: 0.1})}).play();
 ```
 
 | Motion | timesfps |
@@ -497,7 +505,7 @@ animation('.card', {opacity: [0, 1]}, {duration: 0.6, bounce: 0.2, delay: stagge
 | `visualDuration`, `bounce` | `{visualDuration: 1.2 × Motion's, bounce}`; see below |
 | `repeat`, `repeatDelay` | `repeat`, `repeatDelay` |
 | `repeatType` | `repeatMode`, with the same `'loop'`, `'reverse'` and `'mirror'` |
-| `stagger(0.1, {from, ease})` | `stagger({each: 0.1, from, easing})` |
+| `stagger(0.1, {startDelay, from, ease})` | `stagger({step: 0.1, startDelay, from, easing})` |
 | `[null, 100]` | `[null, 100]` |
 | `x`, `y`, `scale`, `rotate` | CSS's individual properties: `translate`, `scale`, `rotate` |
 | `animate([[target, keyframes, {at}], …])` | `sequence().add(target, values, timing, {at}) … .build().play()` |
@@ -528,7 +536,7 @@ gsap.from('.card', {opacity: 0, y: 20, duration: 0.4, ease: 'power2.out', stagge
 
 // timesfps
 animation('.card', {opacity: [0, null], '--y': ['20px', null]}, {
-    duration: 0.4, easing: 'easeOut', delay: stagger({each: 0.1})
+    duration: 0.4, easing: 'easeOut', delay: stagger({step: 0.1})
 }).play();
 ```
 
@@ -542,8 +550,8 @@ animation('.card', {opacity: [0, null], '--y': ['20px', null]}, {
 | `repeat: -1` | `repeat: Infinity` |
 | `yoyo: true` | `repeatMode: 'reverse'` |
 | `repeatDelay` | `repeatDelay` |
-| `stagger: 0.1` | `delay: stagger({each: 0.1})` |
-| `stagger: {each, amount, from, ease}` | `stagger({each, amount, from, easing})`. `from: 'start'` is `'first'`, and `'end'` is `'last'`. There's no `'edges'`, `'random'` or `grid`. |
+| `stagger: 0.1` | `delay: stagger({step: 0.1})` |
+| `stagger: {each, amount, from, ease}` | `stagger({step: each, spread: amount, from, easing})`. `from: 'start'` is `'first'`, and `'end'` is `'last'`. There's no `'edges'`, `'random'` or `grid`. |
 | `x: 100` | `translate: 100` |
 | `y: 20` | a registered custom property, as `'--y'` above (see Values) |
 | `gsap.timeline().to(target, vars, position)` | `sequence().add(target, values, timing, {at})` |

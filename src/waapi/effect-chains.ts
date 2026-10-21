@@ -5,21 +5,21 @@ import type {PlacedEffect, ResolvedEffect} from "./tracks.js";
 
 /** What resolving values needs from the page. */
 export interface CSSValueResolver {
-    /** The property's value on the target as it is now. */
-    currentValueOf(target: Element, property: string): string;
+    /** The property's value on the element as it is now. */
+    currentValueOf(element: Element, property: string): string;
     /** Whether the property takes the value. */
     accepts(property: string, text: string): boolean;
-    /** The value's computed form on the target. */
-    resolve(target: Element, property: string, text: string): string;
+    /** The value's computed form on the element. */
+    resolve(element: Element, property: string, text: string): string;
 }
 
 /** Takes values as plain numbers without a unit, for tracks that stand in for no property of an element. */
 export const plainNumberResolver: CSSValueResolver = {
-    currentValueOf: (_target, property) => {
+    currentValueOf: (_element, property) => {
         throw new Error(`"${property}" has no current value off the page, so it needs a value at 0.`);
     },
     accepts: () => true,
-    resolve: (_target, _property, text) => text
+    resolve: (_element, _property, text) => text
 };
 
 /** An entry's effects on one track, which share its stops. */
@@ -38,7 +38,7 @@ interface EntryEffects {
  * Entries that depend on each other make a chain, and a chain whose first entry has no value at 0 starts from the property's current value.
  * Values pass through when every keyframe of their effect lands on a stop with text; a chain with any other effect is resolved to numbers in one unit.
  */
-export function resolveEffectChains(target: Element, property: string, effects: readonly PlacedEffect[], resolver: CSSValueResolver): ResolvedEffect[] {
+export function resolveEffectChains(element: Element, property: string, effects: readonly PlacedEffect[], resolver: CSSValueResolver): ResolvedEffect[] {
     const entries = entryEffectsOf(effects);
     const declaredIndices = new Map(effects.map((effect, index) => [effect, index]));
     const chains = new Map<EntryEffects, EntryEffects[]>();
@@ -63,7 +63,7 @@ export function resolveEffectChains(target: Element, property: string, effects: 
         const start = entry.stops.startValue;
         if (start.given) continue;
         const predecessor = predecessors.get(entry);
-        const startText = predecessor ? stopValueShownAt(predecessor, entry.start)?.text : resolver.currentValueOf(target, property);
+        const startText = predecessor ? stopValueShownAt(predecessor, entry.start)?.text : resolver.currentValueOf(element, property);
         if (startText === undefined) startsBetweenStops.add(entry);
         else start.adoptText(startText);
     }
@@ -74,7 +74,7 @@ export function resolveEffectChains(target: Element, property: string, effects: 
         if (chain.every(({effects}) => effects.every(effect => passing.has(effect))))
             checkGivenValues(property, chain, resolver);
         else
-            units.set(chain, resolveChainValues(target, property, chain, resolver));
+            units.set(chain, resolveChainValues(element, property, chain, resolver));
     }
     for (const entry of ordered) {
         if (startsBetweenStops.has(entry)) entry.stops.startValue.assignNumber(valueShownAt(predecessors.get(entry)!, entry.start)!);
@@ -124,7 +124,7 @@ function checkGivenValues(property: string, chain: readonly EntryEffects[], reso
     for (const {stops} of chain) {
         for (const value of stops.values) {
             if (value.given && !resolver.accepts(property, value.text!))
-                throw new Error(`"${value.text}" isn't a value "${property}" takes.`);
+                throw new TypeError(`"${value.text}" isn't a value "${property}" takes.`);
         }
     }
 }
@@ -156,15 +156,15 @@ function iterationTimeAt({delay, duration, iterations, direction, fill}: PlacedE
  * Without a value at 0, the chain starts from the property's current value, whose unit the rest must resolve to.
  * Otherwise values that are all numbers in one unit are taken as they are; failing that, the expressions are resolved, and failing that, every value is.
  */
-function resolveChainValues(target: Element, property: string, chain: readonly EntryEffects[], resolver: CSSValueResolver): string {
+function resolveChainValues(element: Element, property: string, chain: readonly EntryEffects[], resolver: CSSValueResolver): string {
     const [first] = chain;
     const values = chain.flatMap(({stops}) => stops.values).filter(value => value.text !== undefined);
     const resolvedNumericOf = (text: string): Numeric => {
         if (!resolver.accepts(property, text))
-            throw new Error(`"${text}" isn't a value "${property}" takes.`);
-        const resolved = resolver.resolve(target, property, text);
+            throw new TypeError(`"${text}" isn't a value "${property}" takes.`);
+        const resolved = resolver.resolve(element, property, text);
         const numeric = parseNumeric(resolved);
-        if (!numeric) throw new Error(`"${text}" resolves to "${resolved}" for "${property}", which isn't a single number with a unit.`);
+        if (!numeric) throw new TypeError(`"${text}" resolves to "${resolved}" for "${property}", which isn't a single number with a unit.`);
         return numeric;
     };
 
@@ -188,7 +188,7 @@ function resolveChainValues(target: Element, property: string, chain: readonly E
     if (givenUnits.size === 1 && !givenUnits.has(undefined)) {
         const unit = given[0]!.unit;
         if (!resolver.accepts(property, `1${unit}`))
-            throw new Error(`"${property}" doesn't take values in "${unit}".`);
+            throw new TypeError(`"${property}" doesn't take values in "${unit}".`);
         values.forEach((value, index) => value.assignNumber(given[index]!.value));
         return unit;
     }

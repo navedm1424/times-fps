@@ -1,22 +1,23 @@
 import type {PropertyStops} from "../resolution/stops.js";
-import {type AnimationTimings, entryPathOf, type EntryPath, type NodeTimings, type SequenceTimings} from "../resolution/timings.js";
+import {type AnimationLayout, entryPathOf, type EntryPath, type LayoutNode, type SequenceLayout} from "../resolution/layout.js";
 import {TrackRun} from "../resolution/track-runs.js";
-import type {RepeatOptions, Seconds} from "../types.js";
+import type {Seconds} from "../types.js";
 import {type CSSValueResolver, resolveEffectChains} from "./effect-chains.js";
 import {type NativeAnimationEffect, nativeEffectOf} from "./native-effects.js";
+import type {RepeatOptions} from "../playback-options.js";
 
-/** A target of an animation, with each property's stops. */
-export interface TargetValues {
-    target: Element;
+/** An element of an animation, with each property's stops. */
+export interface ElementValues {
+    element: Element;
     properties: { [property: string]: PropertyStops };
 }
 
-/** Each target's properties, each with its effects in the order they're declared, which is the order they show over each other in. */
+/** Each element's properties, each with its effects in the order they're declared, which is the order they show over each other in. */
 export type AnimationTracks = Map<Element, { [property: string]: NativeAnimationEffect[] }>;
 
-/** Which target's property a run or an effect animates, and where its entry is declared, which decides what shows over what. */
+/** Which element's property a run or an effect animates, and where its entry is declared, which decides what shows over what. */
 interface TrackKey {
-    target: Element;
+    element: Element;
     property: string;
     /** The animation leaf it comes from, which is undefined for an animation on its own. */
     path: EntryPath | undefined;
@@ -58,54 +59,54 @@ interface Contribution {
 type EffectTiming = Pick<ScheduledEffect, 'delay' | 'duration' | 'iterations' | 'direction' | 'run'>;
 
 /**
- * Resolves the timings into tracks in four stages: the repetitions, the fill conflicts, the values, then the easings.
+ * Resolves the layout into tracks in four stages: the repetitions, the fill conflicts, the values, then the easings.
  * Only the outermost repeat runs as WAAPI iterations; the ones inside it are baked into the keyframes, except that an infinite one only gives its first iteration, and an effect continuing it from there.
  */
 export class AnimationTracksResolver {
-    private constructor(private readonly valuesOf: (path: EntryPath) => readonly TargetValues[]) {}
+    private constructor(private readonly valuesOf: (path: EntryPath) => readonly ElementValues[]) {}
 
-    static resolve(timings: NodeTimings, valuesOf: (path: EntryPath) => readonly TargetValues[], valueResolver: CSSValueResolver): AnimationTracks {
-        const {effects} = new AnimationTracksResolver(valuesOf).scheduleRepetitions(timings, undefined, [], false);
+    static resolve(layout: LayoutNode, valuesOf: (path: EntryPath) => readonly ElementValues[], valueResolver: CSSValueResolver): AnimationTracks {
+        const {effects} = new AnimationTracksResolver(valuesOf).scheduleRepetitions(layout, undefined, [], false);
 
         const effectsByTrack = new Map<Element, Map<string, ScheduledEffect[]>>();
         for (const effect of effects) {
-            let effectsByProperty = effectsByTrack.get(effect.target);
-            if (!effectsByProperty) effectsByTrack.set(effect.target, effectsByProperty = new Map());
+            let effectsByProperty = effectsByTrack.get(effect.element);
+            if (!effectsByProperty) effectsByTrack.set(effect.element, effectsByProperty = new Map());
             let trackEffects = effectsByProperty.get(effect.property);
             if (!trackEffects) effectsByProperty.set(effect.property, trackEffects = []);
             trackEffects.push(effect);
         }
 
-        return new Map([...effectsByTrack].map(([target, effectsByProperty]) => [target, Object.fromEntries(
+        return new Map([...effectsByTrack].map(([element, effectsByProperty]) => [element, Object.fromEntries(
             [...effectsByProperty].map(([property, trackEffects]) => {
                 const declared = trackEffects.sort((first, second) => compareOrders(first.order, second.order));
                 const placed = AnimationTracksResolver.placeFills(declared);
-                return [property, resolveEffectChains(target, property, placed, valueResolver).map(nativeEffectOf)];
+                return [property, resolveEffectChains(element, property, placed, valueResolver).map(nativeEffectOf)];
             })
         )]));
     }
 
-    private scheduleRepetitions(timings: NodeTimings, path: EntryPath | undefined, order: readonly number[], repeatingAncestor: boolean): Contribution {
-        switch (timings.type) {
+    private scheduleRepetitions(layout: LayoutNode, path: EntryPath | undefined, order: readonly number[], repeatingAncestor: boolean): Contribution {
+        switch (layout.type) {
             case 'animation':
-                return this.resolveAnimationRepetitions(timings, path, order, repeatingAncestor);
+                return this.resolveAnimationRepetitions(layout, path, order, repeatingAncestor);
             case 'sequence':
-                return this.resolveSequenceRepetitions(timings, path, order, repeatingAncestor);
+                return this.resolveSequenceRepetitions(layout, path, order, repeatingAncestor);
             case 'staggered-sequence': {
-                const lanes = timings.lanes.map(lane => this.resolveSequenceRepetitions(lane, path, order, repeatingAncestor));
+                const lanes = layout.lanes.map(lane => this.resolveSequenceRepetitions(lane, path, order, repeatingAncestor));
                 return {runs: lanes.flatMap(({runs}) => runs), effects: lanes.flatMap(({effects}) => effects)};
             }
         }
     }
 
-    private resolveAnimationRepetitions(timings: AnimationTimings, path: EntryPath | undefined, order: readonly number[], repeatingAncestor: boolean): Contribution {
+    private resolveAnimationRepetitions(layout: AnimationLayout, path: EntryPath | undefined, order: readonly number[], repeatingAncestor: boolean): Contribution {
         const contribution: Contribution = {runs: [], effects: []};
-        const {timing, playDuration} = timings;
+        const {timing, playDuration} = layout;
         const values = this.valuesOf(path ?? '');
-        for (const {index, start} of timings.targets) {
-            const {target, properties} = values[index]!;
+        for (const {index, start} of layout.elements) {
+            const {element, properties} = values[index]!;
             const runs = Object.entries(properties).map(([property, stops]): KeyedRun =>
-                ({target, property, path, entryStops: stops, order, run: TrackRun.play(playDuration, timing.easing, stops)})
+                ({element, property, path, entryStops: stops, order, run: TrackRun.play(playDuration, timing.easing, stops)})
             );
             const repeated = AnimationTracksResolver.repeated({runs, effects: []}, playDuration, timing.options, repeatingAncestor, order.length);
             const placed = AnimationTracksResolver.shifted(repeated, start);
@@ -115,17 +116,17 @@ export class AnimationTracksResolver {
         return contribution;
     }
 
-    private resolveSequenceRepetitions(timings: SequenceTimings, path: EntryPath | undefined, order: readonly number[], repeatingAncestor: boolean): Contribution {
-        const {options} = timings.sequence;
+    private resolveSequenceRepetitions(layout: SequenceLayout, path: EntryPath | undefined, order: readonly number[], repeatingAncestor: boolean): Contribution {
+        const {options} = layout.sequence;
         const repeats = (options.repeat ?? 0) > 0;
         const children: Contribution = {runs: [], effects: []};
-        [...timings.entries].forEach(([name, entryTimings], index) => {
-            const child = this.scheduleRepetitions(entryTimings, entryPathOf(path, name), [...order, index], repeatingAncestor || repeats);
+        [...layout.entries].forEach(([name, entryLayout], index) => {
+            const child = this.scheduleRepetitions(entryLayout, entryPathOf(path, name), [...order, index], repeatingAncestor || repeats);
             children.runs.push(...child.runs);
             children.effects.push(...child.effects);
         });
-        const repeated = AnimationTracksResolver.repeated(children, timings.playDuration, options, repeatingAncestor, order.length);
-        return AnimationTracksResolver.shifted(repeated, timings.firstStart);
+        const repeated = AnimationTracksResolver.repeated(children, layout.playDuration, options, repeatingAncestor, order.length);
+        return AnimationTracksResolver.shifted(repeated, layout.firstStart);
     }
 
     /**

@@ -2,7 +2,7 @@ import type {CubicBezier} from "../cubic-bezier.js";
 import {CubicBezierEasing, type CubicBezierEasingDescriptor, type EasingFunction, LinearEasing, linear, SpringEasing, StepsEasing} from "../easing.js";
 import type {DampedSpring} from "../damped-spring.js";
 import type {PropertyStops, StopValue} from "../resolution/stops.js";
-import type {EntryPath} from "../resolution/timings.js";
+import type {EntryPath} from "../resolution/layout.js";
 import type {TrackRun, TrackSpan} from "../resolution/track-runs.js";
 import type {Progress, Seconds} from "../types.js";
 import {invLerp, lerp} from "../utils/math.js";

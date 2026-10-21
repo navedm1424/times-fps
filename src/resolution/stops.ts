@@ -54,7 +54,7 @@ export class PropertyStops {
         const stops = sortedByKey(valueStops).map(([progress, value]) => ({progress, value: new StopValue(String(value))}));
         const first = stops[0];
         const last = stops.at(-1);
-        if (!first || !last) throw new Error(`"${property}" has no values.`);
+        if (!first || !last) throw new TypeError(`"${property}" has no values.`);
 
         for (const {progress} of stops) {
             if (!(progress >= 0 && progress <= 1))

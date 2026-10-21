@@ -1,5 +1,14 @@
-import type {RepeatOptions, Seconds, Stagger} from "./types.js";
+import type {Seconds} from "./types.js";
 import {checkNumber} from "./utils/validation.js";
+
+export type Stagger = (index: number, total: number) => Seconds;
+export type RepeatMode = 'loop' | 'reverse' | 'mirror';
+
+export interface RepeatOptions {
+    repeat?: number;           // plays after the first
+    repeatDelay?: Seconds;     // between plays, never after the last
+    repeatMode?: RepeatMode;
+}
 
 /** The options of an animation's timing: a delay before the first play, and how it repeats. */
 export interface AnimationPlaybackOptions extends RepeatOptions {

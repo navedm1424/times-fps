@@ -1,6 +1,6 @@
+import {PRECISION} from "./constants.js";
 import {DampedSpring} from "./damped-spring.js";
 import {type EasingDescriptor, type EasingFunction, linear, resolveEasing, SpringEasing} from "./easing.js";
-import {PRECISION} from "./constants.js";
 import type {Progress, Seconds} from "./types.js";
 import {checkNumber, checkPositive} from "./utils/validation.js";
 
@@ -55,8 +55,8 @@ export type TransitionOptions = EasedTransitionOptions | SpringTransitionOptions
 
 // /** Duration comes from the animation's ratio, so only transitions shaped by a given duration fit. */
 // export type StretchableTransition =
-//     | Omit<EasedTransitionDescriptor, 'duration'>
-//     | Omit<DurationSpringTransitionDescriptor, 'duration'>;
+//     | Omit<EasedTransitionOptions, 'duration'>
+//     | Omit<DurationSpringTransitionOptions, 'duration'>;
 
 const transitionKeyEntries = Object.entries(groupedTransitionKeys);
 const transitionKeySetByKind = Object.fromEntries(
@@ -128,53 +128,28 @@ function requireNumber(value: number | undefined, label: string): asserts value 
 
 /** How long one play of the transition lasts, and the easing it runs. */
 export function resolveTransition(transition: TransitionOptions): { duration: Seconds; easing: EasingFunction } {
-    if (transitionKindOf(transition) === 'eased') {
-        const {duration, easing} = transition as EasedTransitionOptions;
-        return {duration, easing: easing ? resolveEasing(easing) : linear};
+    switch (transitionKindOf(transition)) {
+        case 'eased': {
+            const {duration, easing} = transition as EasedTransitionOptions;
+            return {duration, easing: easing ? resolveEasing(easing) : linear};
+        }
+        case 'physicalSpring': {
+            const {stiffness, damping, mass = 1, velocity = 0, restDelta = PRECISION} = transition as PhysicalSpringTransitionOptions;
+            return springTimingOf(DampedSpring.physical(stiffness, damping, mass, velocity), restDelta);
+        }
+        case 'visualSpring': {
+            const {visualDuration, bounce, velocity = 0} = transition as VisualSpringTransitionOptions;
+            return springTimingOf(DampedSpring.visual(visualDuration, bounce, velocity), PRECISION);
+        }
+        case 'durationSpring': {
+            const {duration, bounce, velocity = 0} = transition as DurationSpringTransitionOptions;
+            return {duration, easing: new SpringEasing(DampedSpring.restingAt(duration, bounce, velocity, PRECISION), duration)};
+        }
     }
+}
 
-    const {spring, duration} = resolveSpring(transition as SpringTransitionOptions);
+/** A spring runs until it comes to rest. */
+function springTimingOf(spring: DampedSpring, restDelta: Progress): { duration: Seconds; easing: EasingFunction } {
+    const duration = spring.restTime(restDelta);
     return {duration, easing: new SpringEasing(spring, duration)};
-}
-
-/** The spring a transition describes, and how long it runs until it's at rest. */
-export function resolveSpring(transition: SpringTransitionOptions): { spring: DampedSpring; duration: Seconds } {
-    const velocity = transition.velocity ?? 0;
-    // Physical spring
-    if (transition.stiffness !== undefined) {
-        const spring = DampedSpring.physical(transition.stiffness, transition.damping, transition.mass ?? 1, velocity);
-        return {spring, duration: spring.restTime(transition.restDelta ?? PRECISION)};
-    }
-    // Visual spring
-    const dampingRatio = dampingRatioOfBounce(transition.bounce);
-    if (transition.visualDuration !== undefined) {
-        const spring = new DampedSpring(2 * Math.PI / transition.visualDuration, dampingRatio, velocity);
-        return {spring, duration: spring.restTime(PRECISION)};
-    }
-    // Duration spring
-    return {spring: springRestingAfter(transition.duration, dampingRatio, velocity), duration: transition.duration};
-}
-
-/** Apple's mapping: a positive bounce lowers the damping ratio from 1, and a negative one raises it past 1. */
-function dampingRatioOfBounce(bounce: number): number {
-    return bounce >= 0 ? 1 - bounce : 1 / (1 + bounce);
-}
-
-const maxRestingRounds = 16;
-
-/**
- * The spring of the damping ratio that comes to rest exactly at `duration`.
- * Its rest time shrinks in proportion as its natural frequency grows, except that the velocity, in progress per second, changes meaning with it; a few rounds settle that.
- */
-function springRestingAfter(duration: Seconds, dampingRatio: number, velocity: number): DampedSpring {
-    const naturalFrequencyFor = (naturalFrequency: number) =>
-        new DampedSpring(1, dampingRatio, velocity / naturalFrequency).restTime(PRECISION) / duration;
-
-    let naturalFrequency = new DampedSpring(1, dampingRatio).restTime(PRECISION) / duration;
-    for (let round = 0; round < maxRestingRounds; round++) {
-        const next = naturalFrequencyFor(naturalFrequency);
-        if (Math.abs(next - naturalFrequency) <= naturalFrequency * 1e-12) break;
-        naturalFrequency = next;
-    }
-    return new DampedSpring(naturalFrequency, dampingRatio, velocity);
 }

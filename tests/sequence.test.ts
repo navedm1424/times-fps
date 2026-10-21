@@ -1,30 +1,66 @@
 import {describe, expect, it} from "vitest";
 import {AnimationTiming} from "../src/animation.js";
-import {type At, parseAt} from "../src/at.js";
+import {type At, parsePositionDescriptor, resolvePosition} from "../src/at.js";
 import {animation, sequence} from "../src/definitions.js";
-import {computeTimings, type SequenceTimings} from "../src/resolution/timings.js";
-import {type AnimationTimingEntry, SequenceTiming} from "../src/sequence.js";
-import {progressStopsOf} from "../src/waapi/mapping.js";
+import {layoutOf, type SequenceLayout} from "../src/resolution/layout.js";
+import {SequenceTiming} from "../src/sequence.js";
+import {progressStopsOf, resolveTargets} from "../src/dom/mapping.js";
 
 const second = AnimationTiming.of({duration: 1});
 
-describe("parseAt", () => {
-    it("reads the previous entry's end, its start, and the end of everything so far", () => {
-        expect(parseAt('>')).toEqual({kind: 'relative', reference: {kind: 'previous'}, anchor: 'end', offset: 0, offsetUnit: 'seconds'});
-        expect(parseAt('-0.3')).toEqual({kind: 'relative', reference: {kind: 'previous'}, anchor: 'end', offset: -0.3, offsetUnit: 'seconds'});
-        expect(parseAt('<+0.1')).toEqual({kind: 'relative', reference: {kind: 'previous'}, anchor: 'start', offset: 0.1, offsetUnit: 'seconds'});
-        expect(parseAt('>>+0.5')).toEqual({kind: 'relative', reference: {kind: 'everything-so-far'}, anchor: 'end', offset: 0.5, offsetUnit: 'seconds'});
+const offset = (seconds: number, referenceFraction = 0, selfFraction = 0) => ({seconds, referenceFraction, selfFraction});
+
+describe("parsePositionDescriptor", () => {
+    it("reads the previous entry's end and start, the start of the sequence, and the end of everything so far", () => {
+        expect(parsePositionDescriptor('')).toEqual({reference: {kind: 'previous-entry'}, anchor: 'end', offset: offset(0)});
+        expect(parsePositionDescriptor('>')).toEqual({reference: {kind: 'previous-entry'}, anchor: 'end', offset: offset(0)});
+        expect(parsePositionDescriptor('-0.3' as At<never>)).toEqual({reference: {kind: 'previous-entry'}, anchor: 'end', offset: offset(-0.3)});
+        expect(parsePositionDescriptor('<+0.1' as At<never>)).toEqual({reference: {kind: 'previous-entry'}, anchor: 'start', offset: offset(0.1)});
+        expect(parsePositionDescriptor('<<')).toEqual({reference: {kind: 'everything-so-far'}, anchor: 'start', offset: offset(0)});
+        expect(parsePositionDescriptor('>>+0.5' as At<never>)).toEqual({reference: {kind: 'everything-so-far'}, anchor: 'end', offset: offset(0.5)});
     });
 
-    it("reads names, and shares of the referenced or the inserted entry", () => {
-        expect(parseAt<'title'>('title<+50%')).toEqual({kind: 'relative', reference: {kind: 'entry', name: 'title'}, anchor: 'start', offset: 0.5, offsetUnit: 'referenced-span'});
-        expect(parseAt<'title'>('title>')).toEqual({kind: 'relative', reference: {kind: 'entry', name: 'title'}, anchor: 'end', offset: 0, offsetUnit: 'seconds'});
-        expect(parseAt('-=25%')).toEqual({kind: 'relative', reference: {kind: 'previous'}, anchor: 'end', offset: -0.25, offsetUnit: 'inserted-span'});
+    it("reads a number as an offset in seconds from the start of the sequence", () => {
+        expect(parsePositionDescriptor(1.5)).toEqual(parsePositionDescriptor('<<+1.5' as At<never>));
+    });
+
+    it("reads names, with or without an anchor", () => {
+        expect(parsePositionDescriptor<'title'>('title')).toEqual({reference: {kind: 'entry', name: 'title'}, anchor: 'end', offset: offset(0)});
+        expect(parsePositionDescriptor<'title'>('title<+50%' as At<'title'>)).toEqual({reference: {kind: 'entry', name: 'title'}, anchor: 'start', offset: offset(0, 0.5)});
+    });
+
+    it("reads one offset of each kind: a share of the reference, a share of the entry's own duration, then seconds", () => {
+        expect(parsePositionDescriptor('<+50%+=50%-1').offset).toEqual(offset(-1, 0.5, 0.5));
+        expect(parsePositionDescriptor('-=25%+1e-1').offset).toEqual(offset(0.1, 0, -0.25));
     });
 
     it("rejects what isn't a position", () => {
-        for (const at of ['+=1', '<0.2', 'title', 'title>>', '<<', '<<+1', '+abc', '', '1.5'])
-            expect(() => parseAt(at as At<'title'>), at).toThrow();
+        for (const at of ['+=1', '<0.2', 'title>>', 'title<<', '<+-1', '>-+50%', '+abc', '+1abc', '1.5', '<<<', '<+1-1', '<+50%-25%', '+=5%-=5%', '<-1+50%', '+=50%+50%'])
+            expect(() => parsePositionDescriptor(at as At<'title'>), at).toThrow(SyntaxError);
+    });
+});
+
+describe("resolvePosition", () => {
+    const spans = new Map([['a', {start: 1, duration: 2}], ['b', {start: 0, duration: 1}]]);
+    const resolve = (at: string, selfDuration = 4) => resolvePosition(parsePositionDescriptor(at as At<'a' | 'b'>), spans, selfDuration);
+
+    it("measures from the previous entry, a named one, the start of the sequence, or the end of everything so far", () => {
+        expect(resolve('')).toBe(1);
+        expect(resolve('<')).toBe(0);
+        expect(resolve('a')).toBe(3);
+        expect(resolve('a<+50%')).toBe(2);
+        expect(resolve('<<+50%')).toBe(1.5);
+        expect(resolve('>>-50%')).toBe(1.5);
+    });
+
+    it("adds every offset, including shares of the inserted entry's duration", () => {
+        expect(resolve('a<+50%+=50%-1')).toBe(3);
+        expect(resolve('>-=50%')).toBe(-1);
+    });
+
+    it("starts from the start of the sequence with no entry before", () => {
+        expect(resolvePosition(parsePositionDescriptor('>+1' as At<never>), new Map(), 2)).toBe(1);
+        expect(resolvePosition(parsePositionDescriptor('>>+50%' as At<never>), new Map(), 2)).toBe(0);
     });
 });
 
@@ -69,19 +105,16 @@ describe("SequenceTimingBuilder", () => {
 });
 
 describe("SequenceTiming", () => {
-    it("validates entries and options made without a builder", () => {
-        const entry: AnimationTimingEntry = {timing: second, at: {kind: 'relative', reference: {kind: 'entry', name: 'b'}, anchor: 'end', offset: 0, offsetUnit: 'seconds'}};
-        expect(() => new SequenceTiming([], {})).toThrow();
-        expect(() => new SequenceTiming(['a'], {a: entry})).toThrow();
-        expect(() => new SequenceTiming(['a-b'], {'a-b': {...entry, at: {kind: 'absolute', time: 0}}})).toThrow();
-        expect(new SequenceTiming(['a'], {a: {...entry, at: {kind: 'absolute', time: 0}}}, {delay: -1}).options).toEqual({delay: 0});
+    it("can only be made by its builder", () => {
+        expect(() => new (SequenceTiming as unknown as new (...args: unknown[]) => SequenceTiming)(['a'], {})).toThrow();
+        expect(() => new (SequenceTiming.builder().constructor as new () => unknown)()).toThrow();
     });
 });
 
 describe("positions", () => {
     const startsOf = (timing: SequenceTiming, names: string[]) => {
-        const timings = computeTimings(timing, new Map(names.map(name => [name, 1]))) as SequenceTimings;
-        return Object.fromEntries(names.map(name => [name, timings.entries.get(name)!.firstStart]));
+        const layout = layoutOf(timing, new Map(names.map(name => [name, 1]))) as SequenceLayout;
+        return Object.fromEntries(names.map(name => [name, layout.entries.get(name)!.firstStart]));
     };
 
     it("places entries after the end of everything so far", () => {
@@ -106,6 +139,23 @@ describe("positions", () => {
     it("starts the first entry from the start of the sequence, and clamps positions before it", () => {
         const timing = SequenceTiming.builder().add('a', second, '-50%').add('b', second, '<-1').build();
         expect(startsOf(timing, ['a', 'b'])).toEqual({a: 0, b: 0});
+    });
+});
+
+describe("targets", () => {
+    const [first, second] = [{} as Element, {} as Element];
+    const scope = {} as Element;
+
+    it("takes an element, or any iterable of them, directly or from a function, each element once", () => {
+        expect(resolveTargets(first, scope)).toEqual([first]);
+        expect(resolveTargets([first, second, first], scope)).toEqual([first, second]);
+        expect(resolveTargets(new Set([second, first]), scope)).toEqual([second, first]);
+        expect(resolveTargets(() => new Set([first]), scope)).toEqual([first]);
+        expect(resolveTargets(() => second, scope)).toEqual([second]);
+    });
+
+    it("rejects a target with no elements", () => {
+        expect(() => resolveTargets([], scope)).toThrow("The target has no elements.");
     });
 });
 
@@ -174,7 +224,7 @@ describe("sequence", () => {
             .add('h2', {opacity: [0, 1]}, fade, {name: 'a'})
             .add('h3', {opacity: [0, 1]}, fade)
             .build();
-        expect(definition.timing.names).toEqual(['b', 'a', 'c']);
+        expect((definition.mappedTiming.timing as SequenceTiming).names).toEqual(['b', 'a', 'c']);
     });
 
     it("takes definitions, named or not, and positions that refer to the names given", () => {
@@ -187,7 +237,7 @@ describe("sequence", () => {
             .build();
         const {timing, mapping} = definition.mappedTiming as {timing: SequenceTiming; mapping: {entries: {[name: string]: unknown}}};
         expect(timing.names).toEqual(['title', 'a', 'cta']);
-        expect(timing.entries.a!.at).toMatchObject({reference: {kind: 'entry', name: 'title'}, anchor: 'start', offset: 0.2});
+        expect(timing.entries.a!.position).toEqual({reference: {kind: 'entry', name: 'title'}, anchor: 'start', offset: offset(0.2)});
         expect(mapping.entries.title).toEqual({target: 'h1', values: {opacity: [0, 1]}});
         expect(mapping.entries.cta).toEqual({entries: {a: {target: '#cta', values: {scale: [0.8, 1]}}}, splitsProperties: false});
     });
@@ -195,15 +245,15 @@ describe("sequence", () => {
     it("gives a new builder from every add", () => {
         const trunk = sequence().add('h1', {opacity: [0, 1]}, fade);
         trunk.add('h2', {opacity: [0, 1]}, fade);
-        expect(trunk.build().timing.names).toEqual(['a']);
+        expect((trunk.build().mappedTiming.timing as SequenceTiming).names).toEqual(['a']);
     });
 
-    it("only lets positions refer to the names given before them", () => {
+    it("only lets positions refer to the names given before them, which its sequence timing checks as it's built", () => {
         // @ts-expect-error: no entry is named "title" yet.
-        expect(() => sequence().add('h1', {opacity: [0, 1]}, fade, {at: 'title>'})).toThrow();
+        expect(() => sequence().add('h1', {opacity: [0, 1]}, fade, {at: 'title>'}).build()).toThrow();
         // @ts-expect-error: an unnamed entry can't be referred to.
-        expect(() => sequence().add('h1', {opacity: [0, 1]}, fade).add('h2', {opacity: [0, 1]}, fade, {at: 'a>'})).toThrow();
-        expect(() => sequence().add('h1', {opacity: [0, 1]}, fade, {name: 'title'}).add('h2', {opacity: [0, 1]}, fade, {name: 'title'})).toThrow();
+        sequence().add('h1', {opacity: [0, 1]}, fade).add('h2', {opacity: [0, 1]}, fade, {at: 'a>'});
+        expect(() => sequence().add('h1', {opacity: [0, 1]}, fade, {name: 'title'}).add('h2', {opacity: [0, 1]}, fade, {name: 'title'}).build()).toThrow();
         expect(() => sequence().build()).toThrow();
     });
 

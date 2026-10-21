@@ -1,33 +1,37 @@
 import {type EasingDescriptor, resolveEasing} from "./easing.js";
-import type {Seconds, Stagger} from "./types.js";
+import type {Seconds} from "./types.js";
 import {checkNumber} from "./utils/validation.js";
+import type {Stagger} from "./playback-options.js";
 
 type StaggerOrigin = 'first' | 'last' | 'center' | number;
 
-/** `each` spaces neighbouring elements; `amount` is how long the farthest element waits. */
-export type StaggerOptions = ({ each: Seconds; amount?: never } | { amount: Seconds; each?: never }) & {
+/** `step` spaces neighbouring elements; `spread` is how far apart the origin's and the farthest element's delays are; `startDelay` is the origin's delay. */
+export type StaggerOptions = ({ step: Seconds; spread?: never } | { spread: Seconds; step?: never }) & {
+    startDelay?: Seconds;
     from?: StaggerOrigin;
     easing?: EasingDescriptor;
 };
 
 export function stagger(options: StaggerOptions): Stagger {
-    const {each, amount, from = 'first', easing} = options;
-    if ((each === undefined) === (amount === undefined))
-        throw new TypeError("A stagger takes either `each` or `amount`.");
-    checkNumber(each, "The stagger's time between elements");
-    checkNumber(amount, "The stagger's amount");
+    const {step, spread, startDelay = 0, from = 'first', easing} = options;
+    if ((step === undefined) === (spread === undefined))
+        throw new TypeError("A stagger takes either `step` or `spread`.");
+    checkNumber(step, "The stagger's step");
+    checkNumber(spread, "The stagger's spread");
+    checkNumber(startDelay, "The stagger's start delay");
     if (typeof from === 'number') checkNumber(from, "The stagger's origin");
     const easingFunction = easing && resolveEasing(easing);
-    return (index, total) => {
+    const spreadDelay = (index: number, total: number): Seconds => {
         const origin = originIndex(from, total);
         const distance = Math.abs(index - origin);
-        if (each !== undefined && !easingFunction) return distance * each;
+        if (step !== undefined && !easingFunction) return distance * step;
 
         const farthestDistance = Math.max(origin, total - 1 - origin);
         if (farthestDistance === 0) return 0;
         const share = easingFunction ? easingFunction.progressAt(distance / farthestDistance) : distance / farthestDistance;
-        return share * (each !== undefined ? farthestDistance * each : amount!);
+        return share * (step !== undefined ? farthestDistance * step : spread!);
     };
+    return (index, total) => startDelay + spreadDelay(index, total);
 }
 
 function originIndex(from: StaggerOrigin, total: number): number {

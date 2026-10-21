@@ -57,16 +57,16 @@ Everything here is value-free: it describes how a change from 0 to 1 unfolds in 
 - **The definition only knows that something goes from 0 to 1.** The values decide what 0, 0.5 and 1 mean.
 - **`PRECISION`** (0.001, `src/constants.ts`) is how close two progresses must be to count as the same. It's the rest threshold of every spring without its own `restDelta`, and the precision every fitted curve keeps.
 
-### 2.2 Transition descriptors
+### 2.2 Transition options
 
-A transition descriptor shapes one play: its duration, and how its progress moves (`src/transition.ts`).
+Transition options shape one play: its duration, and how its progress moves (`src/transition.ts`).
 
 ```ts
-type TransitionDescriptor = EasedTransitionDescriptor | SpringTransitionDescriptor;
-type SpringTransitionDescriptor =
-    | DurationSpringTransitionDescriptor
-    | VisualSpringTransitionDescriptor
-    | PhysicalSpringTransitionDescriptor;
+type TransitionOptions = EasedTransitionOptions | SpringTransitionOptions;
+type SpringTransitionOptions =
+    | DurationSpringTransitionOptions
+    | VisualSpringTransitionOptions
+    | PhysicalSpringTransitionOptions;
 ```
 
 | Kind | Fields | Told apart by |
@@ -84,7 +84,7 @@ type SpringTransitionDescriptor =
 - **Extension rule:** a new kind needs a required key no other kind has. Eased stays the fallback, so `bounce` must stay required.
 - There are no `eased()` or `spring()` factories: the fields are clearer written out.
 
-**Validation** (`checkTransition`, on every way a timing is made):
+**Validation** (`checkTransitionOptions`, on every way a timing is made):
 
 | Field | Rule |
 |---|---|
@@ -95,22 +95,17 @@ type SpringTransitionDescriptor =
 | `restDelta` | Strictly between 0 and 1. |
 | `easing` | As in §2.3. |
 
-So every spring that reaches `DampedSpring` has a positive natural frequency and damping ratio.
-
-**Resolution** (`resolveTransition`) gives the play's `duration` and its `EasingFunction`:
+**Resolution** (`resolveTransition`) gives the play's `duration` and its `EasingFunction`: which easing goes with each kind. The spring math behind a spring's easing belongs to the springs themselves (§4):
 - **Eased:** the duration as given, and `resolveEasing(easing)`, or `linear` without one.
-- **Springs:** `resolveSpring` gives a `DampedSpring` and the duration, and the easing is `new SpringEasing(spring, duration)`:
+- **Springs:** the duration below, and a `SpringEasing` over it:
 
 | Kind | Natural frequency ω₀ | Damping ratio ζ | Duration |
 |---|---|---|---|
-| Physical | √(k / m) | c / (2√(k·m)) | `restTime(restDelta ?? PRECISION)` |
-| Visual | 2π / `visualDuration` | from `bounce` | `restTime(PRECISION)` |
-| Duration | solved, below | from `bounce` | `duration` as given |
+| Physical | √(k / m) | c / (2√(k·m)) | until it rests within `restDelta ?? PRECISION` |
+| Visual | 2π / `visualDuration` | from `bounce` | until it rests within `PRECISION` |
+| Duration | solved so it rests within `PRECISION` exactly at `duration` | from `bounce` | `duration` as given |
 
 - **`bounce` to ζ,** as Apple's springs do: `bounce ≥ 0 ? 1 − bounce : 1 / (1 + bounce)`.
-- **Solving a duration spring** (`springRestingAfter`): rest time shrinks in proportion as ω₀ grows, except that the velocity, in progress per second, changes meaning with ω₀.
-    - It starts from ω₀ = `DampedSpring(1, ζ).restTime(PRECISION) / duration`.
-    - It repeats ω₀ ← `DampedSpring(1, ζ, velocity / ω₀).restTime(PRECISION) / duration`, up to 16 rounds, until the change is at most ω₀ × 10⁻¹².
 - **Spring quantities are in progress units.** `velocity` is progress per second, and `restDelta` is a `Progress`, defaulting to `PRECISION`. This is sound because a spring's motion is linear in its distance: a spring from 0 to 1 is a scaled copy of the same spring between any two values.
 
 ### 2.3 Easings
@@ -159,33 +154,7 @@ So every spring that reaches `DampedSpring` has a positive natural frequency and
 - **Steps:** `jumps` is `count` for `jumpStart` and `jumpEnd`, `count − 1` for `jumpNone`, and `count + 1` for `jumpBoth`. `startJump` is 1 for `jumpStart` and `jumpBoth`, and 0 otherwise.
 - **Springs:** a `SpringEasing` is the spring's closed-form motion over its duration. It closes the gap left at the end, 1 − position(`duration`), evenly from its last turning time to its duration, so it ends at exactly 1 without a jump.
 
-### 2.4 Damped springs
-
-`new DampedSpring(naturalFrequency, dampingRatio, initialVelocity = 0)` is a mass on a damped spring that starts at progress 0 and is pulled towards 1, in closed form throughout (`src/damped-spring.ts`).
-
-- **Validation:** ω₀ and ζ must be finite and above 0.
-- **`DampedSpring.physical(stiffness, damping, mass, velocity)`** converts from `m·x″ = −k·x − c·x′`.
-
-| Regime | When | Motion |
-|---|---|---|
-| Underdamped | ζ < 1 | Swings around the target, decaying at ζω₀, with frequency ω₀√(1 − ζ²) |
-| Critically damped | ζ = 1 | The fastest approach that doesn't swing past the target, unless pushed |
-| Overdamped | ζ > 1 | Creeps in as the sum of decays at ω₀(−ζ ± √(ζ² − 1)) |
-
-| Member | Meaning |
-|---|---|
-| `positionAt(t)`, `velocityAt(t)` | Progress and progress per second. |
-| `accelerationAt(t)` | From `x″ = −ω₀²·x − 2ζω₀·x′`. |
-| `turningTimes(until)` | The times after 0 and before `until` where the velocity is 0, in order. |
-| `restTime(restDelta)` | When the spring comes within `restDelta` of its target for good. |
-
-**Rest time.** Between turning times the spring only moves one way, so it enters the rest band once, after the last swing that leaves it.
-1. If it starts within the band, it's 0.
-2. Otherwise, it walks the turning times while the displacement there is outside the band.
-3. With no turning time inside the band, it doubles a reach from π/ω₀ until the spring is inside.
-4. It solves for the band's edge, on the side of the last swing out, with `solveMonotone`.
-
-### 2.5 Timing options
+### 2.4 Playback options
 
 ```ts
 type RepeatMode = 'loop' | 'reverse' | 'mirror';
@@ -196,11 +165,11 @@ interface RepeatOptions {
     repeatMode?: RepeatMode;
 }
 
-interface AnimationTimingOptions extends RepeatOptions {
+interface AnimationPlaybackOptions extends RepeatOptions {
     delay?: Seconds | Stagger;  // before the first play; not repeated
 }
 
-type SequenceTimingOptions = AnimationTimingOptions;
+type SequencePlaybackOptions = AnimationPlaybackOptions;
 ```
 
 | Option | Default | Rule |
@@ -218,14 +187,15 @@ type SequenceTimingOptions = AnimationTimingOptions;
 
 - **For a sequence,** `reverse` reverses the whole iteration in time, and `mirror` does the same but keeps each animation's easing running forwards through flipped values.
 - **`Infinity`** is valid on animations and sequences, including an infinite entry inside an infinitely repeating sequence.
-- **Clamping** is `clampedDelay` and `clampedRepeats` (`src/playback-options.ts`). `NaN` and infinite times throw through `checkNumber` (`src/utils/validation.ts`).
+- **Checks and clamping** are `checkPlaybackOptions`, `clampedDelay` and `clampedRepeats` (`src/playback-options.ts`). `NaN` and infinite times throw through `checkNumber` (`src/utils/validation.ts`).
 
-### 2.6 Staggers
+### 2.5 Staggers
 
 ```ts
 type Stagger = (index: number, total: number) => Seconds;
 
-type StaggerOptions = ({each: Seconds; amount?: never} | {amount: Seconds; each?: never}) & {
+type StaggerOptions = ({step: Seconds; spread?: never} | {spread: Seconds; step?: never}) & {
+    startDelay?: Seconds;                   // 0 by default
     from?: 'first' | 'last' | 'center' | number;
     easing?: EasingDescriptor;
 };
@@ -241,43 +211,47 @@ A stagger is a `delay` given as a function of each element's index (`src/stagger
 | distance | \|index − origin\| |
 | farthest | max(origin, total − 1 − origin) |
 
-| Options | Delay |
+| Options | Delay, before `startDelay` is added |
 |---|---|
-| `each` | distance × `each` |
-| `each`, `easing` | easing(distance / farthest) × farthest × `each` |
-| `amount` | distance / farthest × `amount` |
-| `amount`, `easing` | easing(distance / farthest) × `amount` |
+| `step` | distance × `step` |
+| `step`, `easing` | easing(distance / farthest) × farthest × `step` |
+| `spread` | distance / farthest × `spread` |
+| `spread`, `easing` | easing(distance / farthest) × `spread` |
 
-- With `amount`, the farthest element waits exactly `amount`. With `from: 'center'`, both edges do.
-- With `easing` or `amount`, a farthest distance of 0 gives 0.
-- **Validation:** exactly one of `each` and `amount`, and `each`, `amount` and a number `from` must be finite.
+- **`startDelay`** is the origin's delay, added to every element's.
+- With `spread`, the farthest element waits exactly `startDelay + spread`. With `from: 'center'`, both edges do.
+- With `easing` or `spread`, a farthest distance of 0 gives `startDelay`.
+- **Validation:** exactly one of `step` and `spread`, and `step`, `spread`, `startDelay` and a number `from` must be finite.
+- **The names** say what each one is: `step` is the time between neighbours, `spread` the time the delays spread over. GSAP calls them `each` and `amount`, and Motion calls `startDelay` the same.
 - **Resolved delays:** negative ones become 0, and NaN or infinite ones throw.
 - **Any `Stagger` function** works where a stagger does.
 
-### 2.7 Animation timing
+### 2.6 Animation timing
 
 ```ts
 class AnimationTiming {
-    private constructor(transition: TransitionDescriptor, options?: AnimationTimingOptions);
-    static of(transition: TransitionDescriptor, options?: AnimationTimingOptions): AnimationTiming;
+    private constructor(transition: TransitionOptions, options?: AnimationPlaybackOptions);
+    static of(timing: AnimationTimingDescriptor): AnimationTiming;
+    static of(transition: TransitionOptions, options?: AnimationPlaybackOptions): AnimationTiming;
 
-    readonly transition: TransitionDescriptor;
-    readonly options: AnimationTimingOptions;    // clamped
+    readonly transition: TransitionOptions;
+    readonly options: AnimationPlaybackOptions;  // clamped
     readonly duration: Seconds;                  // one play
     readonly easing: EasingFunction;
 }
 
-type AnimationTimingDescriptor = TransitionDescriptor & AnimationTimingOptions;
+type AnimationTimingDescriptor = TransitionOptions & AnimationPlaybackOptions;
 ```
 
 - **One play through the transition,** with its delay and repeats (`src/animation.ts`).
 - **`of` is the only way to make one.** The constructor is private, and validates the transition and options, clamps the options, and resolves the transition once, so every adapter shares the same math.
-- **A descriptor** is a transition with the options spread into it. Wherever a timing is taken, it's split by key into the transition and the timing options (`delay`, `repeat`, `repeatDelay`, `repeatMode`) and made into an `AnimationTiming` there. The two key sets never overlap.
+- **A descriptor** is a transition with the options spread into it. `of` splits its first argument by key into the transition options and the playback options (`delay`, `repeat`, `repeatDelay`, `repeatMode`), and the `options` given override the ones split out. The two key sets never overlap, so a transition on its own splits into itself, and both overloads share one implementation.
+- **Wherever a timing is taken,** an `AnimationTiming` is used as it is, and a descriptor goes through `of` there.
 - **Timings have no name.** They get one when they're placed in a sequence, so the same timing can be placed many times.
 - **There's no superclass.** Each timing class validates its own options.
-- **`TimedTweenAnimation`** is pending and internal (`@internal`, stripped from the build): tweens that run one after another, each with its own transition, delay and finite repeats. Sequences can't hold it yet, and nothing plays it.
+- **`TimedTweenTiming`** is pending and internal (`@internal`, stripped from the build): tweens that run one after another, each with its own transition, delay and finite repeats. Sequences can't hold it yet, and nothing plays it.
 
-### 2.8 Sequence timing
+### 2.7 Sequence timing
 
 ```ts
 class SequenceTiming {
@@ -288,69 +262,90 @@ class SequenceTimingBuilder<SE extends SequenceTimingEntries = {}> {
     add<N extends string>(name: N, timing: AnimationTiming | AnimationTimingDescriptor, at?: At<keyof SE & string>)
         : SequenceTimingBuilder<SE & { [_ in N]: AnimationTimingEntry }>;
     add<N extends string, NS extends SequenceTiming>(name: N, sequence: NS, at?: At<keyof SE & string>)
-        : SequenceTimingBuilder<SE & { [_ in N]: NestedSequenceTimingEntry<NS> }>;
-    build(options?: SequenceTimingOptions): SequenceTiming<SE>;
+        : SequenceTimingBuilder<SE & { [_ in N]: SubsequenceTimingEntry<NS> }>;
+    build(options?: SequencePlaybackOptions): SequenceTiming<SE>;
 }
 ```
 
 A sequence timing lays named timings out in time, without targets or values (`src/sequence.ts`).
 
 - **Names** are required, because a mapping refers to entries by name (§3.6). They're unique within their sequence, and can only contain letters, digits and underscores. So they can't contain `>`, and entry paths can't collide.
-- **`add`** checks the name, parses the position and checks its references against the names so far, and makes a descriptor into an `AnimationTiming`, so all of these throw at the `add` that wrote them.
+- **The builder is the only validator.** `add` checks the name (`checkNewName`), parses the position and checks it against the names so far (`checkPositionDescriptor`, `src/at.ts`), and makes a descriptor into an `AnimationTiming`, so all of these throw at the `add` that wrote them. `build` checks and clamps the options as an animation timing's, and throws for a sequence without entries.
+- **Private constructors.** `SequenceTiming` and `SequenceTimingBuilder` have private constructors that throw unless they're passed a license symbol private to `src/sequence.ts`. `SequenceTiming.builder()` is the only way in, so a `SequenceTiming` is always one a builder checked, and its constructor checks nothing.
 - **Builders are immutable.** `add` returns a new builder with its own copy of the entries, so branches never share entries.
-- **`build`** validates and clamps the options as an animation timing's, and throws for a sequence without entries. The `SequenceTiming` constructor checks its names and positions again, so a sequence timing made without the builder is checked too.
-- **Entries** are kept in order as `names`, with `entries` keyed by name. Each is `{timing, at}` (`AnimationTimingEntry`) or `{sequence, at}` (`NestedSequenceTimingEntry`), with its parsed position. The builder's and the timing's type parameter is the entries' type, so a mapping's type can mirror the tree (§3.6), and `At` takes its names.
+- **Entries** are kept in order as `names`, with `entries` keyed by name. Each is `{timing, position}` (`AnimationTimingEntry`) or `{sequence, position}` (`SubsequenceTimingEntry`), where `position` is the parsed `PositionDescriptor`. The builder's and the timing's type parameter is the entries' type, so a mapping's type can mirror the tree (§3.6), and `At` takes its names.
 - **Nesting.** A nested sequence is one unit on the outer timeline. Its entries' positions only place them within it.
 
-#### 2.8.1 Positions (`At`)
+#### 2.7.1 Positions
+
+`at` is a position written as an expression. `parsePositionDescriptor` parses it into a `PositionDescriptor`, and `resolvePosition` turns that into a time. All three live in `src/at.ts`.
 
 ```
-at        = Seconds | string
-string    = [name] [anchor] [offset]       at least one of anchor and offset
-anchor    = '<' | '>' | '>>'               '>>' takes no name
-offset    = sign ['='] amount ['%']        '=' only together with '%'
-sign      = '+' | '-'
+at              = Seconds | expression
+expression      = point [referenceOffset] [selfOffset] [secondsOffset]
+point           = '' | '>' | '<' | name | name '>' | name '<' | '<<' | '>>'
+referenceOffset = sign amount '%'
+selfOffset      = sign '=' amount '%'
+secondsOffset   = sign amount
+sign            = '+' | '-'
 ```
 
-| Anchor | Relative to |
-|---|---|
-| none, or `>` | the referenced entry's last referenceable end |
-| `<` | the referenced entry's first start |
-| `>>` | the latest last referenceable end among all earlier entries |
+| Point | Reference point | Reference duration |
+|---|---|---|
+| `''`, `'>'` | the previous entry's end | the previous entry's duration |
+| `'<'` | the previous entry's start | the previous entry's duration |
+| `name`, `name>` | that entry's end | that entry's duration |
+| `name<` | that entry's start | that entry's duration |
+| `'<<'` | the start of the sequence, 0 | from 0 to the latest end so far |
+| `'>>'` | the latest end so far | from 0 to the latest end so far |
 
-| Offset | Measured in |
+| Offset, in order | Adds |
 |---|---|
+| `+n%`, `-n%` | a fraction of the reference duration |
+| `+=n%`, `-=n%` | a fraction of the inserted entry's duration |
 | `+n`, `-n` | seconds |
-| `+n%`, `-n%` | shares of the referenced entry's span, or of everything so far for `>>` |
-| `+=n%`, `-=n%` | shares of the inserted entry's span |
 
-| Position | Meaning |
-|---|---|
-| omitted | `'>'` |
-| `1.5` | absolute time from the start of the sequence's iteration |
-| `'>'`, `'+0.2'`, `'>-0.3'` | from the previous entry's end |
-| `'<'`, `'<+0.1'` | from the previous entry's start |
-| `'>>'`, `'>>+0.5'`, `'>>-=25%'` | from the end of everything so far |
-| `'title>'`, `'title+0.2'`, `'title>+0.2'` | from `title`'s end |
-| `'title<'`, `'title<+50%'` | from `title`'s start |
+- **A number** `n` is `'<<+n'`.
+- **An omitted `at`** is `'>'`.
+- **One offset of each kind, in that order.** It follows how a position is thought out: the point on the reference, which part of the entry sits on it, then a nudge. `'<+50%-=50%+0.1'` centres the entry on the previous entry's midpoint, 0.1 seconds later. Two offsets of one kind would only need adding up, so the bound of three explains itself, and every position has one spelling.
 
-- **The type.** `At<Names>` is a template literal type over the names given so far, so positions can only refer to earlier names.
-- **The parsed form.** `parseAt` gives either `{kind: 'absolute', time}`, or a relative position with:
-    - `reference`: `{kind: 'entry', name}`, `{kind: 'previous'}` or `{kind: 'everything-so-far'}`;
-    - `anchor`: `'start'` or `'end'`;
-    - `offset`, in seconds, or as a fraction for shares (`25%` is 0.25), and `offsetUnit`: `'seconds'`, `'referenced-span'` or `'inserted-span'`.
-- **Resolving** (`positionOf`, `src/resolution/timings.ts`): the reference's anchor plus the offset, which for shares is the fraction times the referenced span or the inserted entry's span. The inserted span comes from the entry's timings at position 0.
-- **These throw** at `add`:
-    - a string that doesn't parse;
-    - `=` without `%` (`'+=1'`);
-    - an offset without a sign (`'<0.2'`);
-    - a name without an anchor or offset (`'title'`);
-    - a name before `>>` (`'title>>'`);
-    - `<<` in any form;
-    - a reference to a name that isn't an earlier entry;
-    - a time or offset that isn't finite.
+**The descriptor.** Every position is a reference point, a reference duration and an offset:
 
-#### 2.8.2 Reach
+```ts
+type PositionReference<Name> =
+    | {kind: 'previous-entry'}
+    | {kind: 'entry'; name: Name}
+    | {kind: 'everything-so-far'};          // from 0 to the latest end so far
+
+interface PositionDescriptor<Name> {
+    reference: PositionReference<Name>;     // gives the reference point and the reference duration
+    anchor: 'start' | 'end';                // which end of the reference is the point
+    offset: {seconds: Seconds; referenceFraction: number; selfFraction: number};
+}
+```
+
+- Each offset fills its kind's field, and a missing one is 0. `25%` is a fraction of 0.25.
+- `'<<'` is `everything-so-far` at its `start`, and `'>>'` at its `end`.
+
+**Resolving.** `resolvePosition(descriptor, entrySpans, selfDuration)`:
+- `entrySpans` maps the earlier entries' names to `EntrySpan`s, `{start, duration}`, in order, so its last entry is the previous one. With none, the previous entry is `{start: 0, duration: 0}`.
+- Everything so far is `{start: 0, duration: latest end}`, where the latest end is the largest `start + duration`, or 0.
+- The result is the reference point, plus the seconds, plus `referenceFraction` × the reference duration, plus `selfFraction` × `selfDuration`.
+- It can be negative. The timings resolver (§5.3) clamps it to 0, and passes the inserted entry's duration only when `selfFraction` isn't 0, taking it from the entry's timings at position 0.
+
+**These throw a `SyntaxError`** at `add`, with the reason after `Can't parse the position "…":`:
+- `=` without `%` (`'+=1'`);
+- two offsets of one kind (`'<+1-1'`), or offsets out of order (`'<-1+50%'`);
+- an offset without a sign (`'<0.2'`), or anything else after an offset;
+- a sign without an amount after it (`'<+-1'`, `'>-+50%'`);
+- a name before `<<` or `>>` (`'title<<'`, `'title>>'`);
+- an amount that isn't a number (`'+abc'`).
+
+`checkPositionDescriptor`, next to the parser, then throws an `Error` for a reference to a name that isn't an earlier entry, and a `RangeError` for any offset that isn't finite (`'+Infinity'`).
+
+**The type.** `At<Name>` is a template literal type over the names given so far, so positions can only refer to earlier names. Its offsets are three optional slots in their order, so the type rejects repeated and out-of-order offsets too.
+
+#### 2.7.2 Reach
 
 Times are local to the iteration of the sequence an entry is in.
 
@@ -358,14 +353,14 @@ Times are local to the iteration of the sequence an entry is in.
 |---|---|
 | **First start** | The position plus the delay: an animation's shortest staggered delay, or a sequence's delay. A staggered sequence's is its earliest copy's. References to an entry's start resolve to its first start. |
 | **Last referenceable end** | Finite entry: its end, after its delay and all its repeats. Infinite entry: the end of its first iteration, since infinity can't be referred to. Staggered animation: from its latest element. Sequence: from its iterations, each lasting until the latest last referenceable end among its entries. Staggered sequence: from its latest copy. |
-| **Span** | Last referenceable end − first start. `=%` uses the inserted entry's own span, which doesn't depend on its position. |
-| **Previous entry** | The entry added just before. For the first entry, it's the start of the sequence, with a span of 0. |
-| **Everything so far** | Ends at the latest last referenceable end among the earlier entries, and spans from the earliest first start among them. With none, it's the start of the sequence. |
+| **Duration** | For positions, an entry's `EntrySpan` runs from its first start to its last referenceable end. The inserted entry's doesn't depend on its position. |
+| **Previous entry** | The entry added just before. For the first entry, it's the start of the sequence, with a duration of 0. |
+| **Everything so far** | From 0 to the latest last referenceable end among the earlier entries, or 0 with none. |
 
 - A position that resolves below 0 becomes 0.
 - References never reach into nested sequences.
 
-#### 2.8.3 Staggered sequences
+#### 2.7.3 Staggered sequences
 
 A sequence whose `delay` is a stagger plays once per element index. The copy at index *i* plays element *i* of each of its animations, so every animation inside must have the same number of elements, *n*, or playing throws.
 
@@ -373,7 +368,7 @@ A sequence whose `delay` is a stagger plays once per element index. The copy at 
 - A stagger inside the copy, on an animation or a nested sequence, gives it its delay at (*i*, *n*), as it would one element. That pushes on the entry in that copy only.
 - From outside, the staggered sequence's first start is its earliest copy's, and its ends are its latest copy's.
 
-#### 2.8.4 Repeats in sequences
+#### 2.7.4 Repeats in sequences
 
 - **Repeats compound.** An entry that repeats inside a repeating sequence plays all of its repeats in every iteration of the sequence.
 - **An infinite entry inside a sequence** plays only its first iteration in each iteration of the sequence, and carries on repeating once the sequence is done (§5.4).
@@ -417,10 +412,10 @@ function animation<Values extends AnimationValues>(
 
 ```ts
 type CSSSelector = string;
-type Target = Element | Element[] | CSSSelector | ((scope: Element) => Element | Iterable<Element>);
+type Target = Element | Iterable<Element> | CSSSelector | ((scope: Element) => Element | Iterable<Element>);
 ```
 
-- **Resolution** (`resolveTargets`, at `play`): a selector is `scope.querySelectorAll`, and a function is called with the scope. A function can return one element or any iterable of them, such as a `NodeList`.
+- **Resolution** (`resolveTargets`, at `play`): a selector is `scope.querySelectorAll`, and a function is called with the scope. A target, or what its function returns, is one element or any iterable of them, such as an array or a `NodeList`. A string is never taken as an iterable: it's always a selector.
 - **Elements are deduplicated** in order. An element's index in that order is what staggers use: document order for a selector.
 - **No elements throws:** `"<selector>" matches no elements.`, or `The target has no elements.`
 
@@ -442,7 +437,7 @@ type AnimationValues = { [property: string]: ValueStops };
 | `{p: v, …}` | as keyed |
 | `null` at 0 or 1 | that stop is missing |
 
-- `progressStopsOf` (`src/waapi/mapping.ts`) turns the forms into stops. Keys outside 0–1 throw. `null` anywhere but the ends throws, and so does a list or object without values.
+- `progressStopsOf` (`src/dom/mapping.ts`) turns the forms into stops. Keys outside 0–1 throw. `null` anywhere but the ends throws, and so does a list or object without values.
 - **A missing 0** is the value underneath as the entry starts: the value its track shows then (§5.6), or the property's current value when `play` is called.
 - **A missing 1** is the value underneath as the entry ends. §5.6 only resolves missing starts so far, so a missing 1 takes the last given value for now (`PropertyStops.of`).
 - **Between stops,** the value is linear in the progress. Past the ends, as a spring overshoots, it continues the nearest segment.
@@ -491,13 +486,13 @@ class SequenceDefinitionBuilder<Names extends string = never> {
         placement?: EntryPlacementOptions<N, Names>
     ): SequenceDefinitionBuilder<Names | N>;
 
-    build(options?: SequenceTimingOptions): SequenceDefinition;
+    build(options?: SequencePlaybackOptions): SequenceDefinition;
 }
 ```
 
 - **Forms.** A first argument that's an `AnimationDefinition` or a `SequenceDefinition` is a definition entry. Otherwise it's inline. A target is never a definition, so `instanceof` decides, and argument shapes are never guessed.
 - **The inline form** is `add(animation(target, values, timing), placement)` flattened.
-- **At `add`:** a given name is checked as in §2.8, the position is parsed and checked against the names given so far, and an inline timing is made. All of these throw there.
+- **`add` checks nothing,** except that an inline entry's `animation()` is made there. Names and positions are only checked by the `SequenceTiming` builder at `build`, under the names entries end up with, so their mistakes throw at `build`. A position that refers to an automatic name (`'a>'`) is a type error, but at runtime it refers to that entry.
 - **Names are optional.** Given names join `Names`, which types `at`. Entries without a name can't be referred to.
 - **Immutable:** each `add` returns a new builder with its own copy of the entries.
 - **`build`**:
@@ -544,9 +539,9 @@ interface PlayOptions {
 definition.play(options?: PlayOptions): AnimationControls;
 ```
 
-- **Each `play`** calls `WAAPIAnimator.play(timing, mapping, options)`, which resolves the targets in the scope, the values per element, the timings with the element counts, and the tracks, then calls `element.animate()` for each effect (§5).
-- **What a definition holds** (`mappedTiming`, `@internal`): its timing, an `AnimationTiming` or a `SequenceTiming`, and a **mapping tree** of the same shape, `MappingTree` (`src/waapi/mapping.ts`). Its leaves are `AnimationMapping`s, and each sequence is a `SequenceMappingNode`, `{entries, splitsProperties}`.
-- `AnimationDefinition` also exposes its `target`, `values` and `timing` (an `AnimationTiming`, or one per property). `SequenceDefinition` exposes its `timing`. Their constructors are `@internal`.
+- **Each `play`** calls `WAAPIAnimator.play(timing, mapping, options)`, which resolves the targets in the scope, the values per element, the layout with the element counts, and the tracks, then calls `element.animate()` for each effect (§5).
+- **What a definition holds** (`mappedTiming`, `@internal`): its timing, an `AnimationTiming` or a `SequenceTiming`, and a **mapping tree** of the same shape, `MappingTree` (`src/dom/mapping.ts`). Its leaves are `AnimationMapping`s, and each sequence is a `SequenceMappingNode`, `{entries, splitsProperties}`.
+- **Definitions expose nothing but `play`.** Their inputs aren't kept on them: `mappedTiming` holds everything, and it and their constructors are `@internal`.
 - **It always starts playing.** There's no `autoplay`: pausing right after `play` shows no motion, because no frame renders in between.
 - **Animation `id`s** are the entry path and the property, `path:property`, or the property alone for an animation on its own. The path is the entry names leading to the leaf, joined by `>`, leaving out the names of entries inside a node that `splitsProperties`.
 
@@ -584,36 +579,47 @@ definition.play(options?: PlayOptions): AnimationControls;
 | Definitions and controls (types) | `AnimationDefinition`, `SequenceDefinition`, `Definition`, `SequenceDefinitionBuilder`, `SequenceTimingBuilder`, `AnimationControls`, `PlayOptions` |
 | Targets and values | `Target`, `CSSSelector`, `CSSValue`, `ValueStops`, `AnimationValues`, `PropertyTimings` |
 | Placement and mappings | `EntryPlacementOptions`, `AnimationMapping`, `SequenceMapping` |
-| Timing | `AnimationTimingDescriptor`, `AnimationTimingOptions`, `SequenceTimingOptions`, `RepeatOptions`, `RepeatMode`, `Stagger`, `StaggerOptions`, `At` |
-| Transitions | `TransitionDescriptor`, `EasedTransitionDescriptor`, `SpringTransitionDescriptor`, `DurationSpringTransitionDescriptor`, `VisualSpringTransitionDescriptor`, `PhysicalSpringTransitionDescriptor` |
+| Timing | `AnimationTimingDescriptor`, `AnimationPlaybackOptions`, `SequencePlaybackOptions`, `RepeatOptions`, `RepeatMode`, `Stagger`, `StaggerOptions`, `At` |
+| Transitions | `TransitionOptions`, `EasedTransitionOptions`, `SpringTransitionOptions`, `DurationSpringTransitionOptions`, `VisualSpringTransitionOptions`, `PhysicalSpringTransitionOptions` |
 | Easings | `EasingDescriptor`, `CubicBezierEasingDescriptor`, `StepsEasingDescriptor`, `StepPosition`, `EasingFunction` |
 | Units | `Seconds`, `Progress` |
+
+### 3.11 Errors
+
+Every error has the type of what went wrong:
+
+| Type | Thrown for | Examples |
+|---|---|---|
+| `RangeError` | A number out of range | a negative duration, `NaN` or an infinite time, a `bounce` outside −1–1, a value key outside 0–1, a steps count below 1 |
+| `TypeError` | An input of the wrong shape or kind | a transition missing a required key or mixing kinds, `step` with `spread`, no values or a `null` between the ends, a missing or extra property timing, a missing mapping entry, a value the property doesn't take, a constructor called outside its builder |
+| `SyntaxError` | A position that doesn't parse | `'<0.2'`, `'+=1'`, `'<+1-1'` |
+| `Error` | Anything else | a duplicate or invalid name, a reference to a later entry, an empty sequence, a target with no elements, values that end up in different units, element counts that differ in a staggered sequence |
 
 ## 4. Code layout
 
 | File | Responsibility |
 |---|---|
-| `src/types.ts` | Shared definition types: `Seconds`, `Progress`, `Stagger`, `RepeatOptions` |
+| `src/types.ts` | Units: `Seconds` and `Progress` |
 | `src/constants.ts` | `PRECISION`: how close two progresses must be to count as the same |
 | `src/easing.ts` | Easing descriptors and the windowed easing functions |
 | `src/cubic-bezier.ts` | Cubic Bézier math: coordinates, inverses, turning points, inflections, splitting |
-| `src/damped-spring.ts` | Closed-form damped springs in each damping regime: positions, turning times, rest time |
-| `src/transition.ts` | Transition descriptors, telling their kinds apart, checking them, and resolving them into a duration and an easing function |
-| `src/playback-options.ts` | `AnimationTimingOptions` and `SequenceTimingOptions`, their checks and their clamps |
+| `src/damped-spring.ts` | Closed-form damped springs in each damping regime: positions, turning times, rest time, and the factories each spring kind is made with: `physical`, `visual`, and `restingAt`, which solves a spring that comes to rest at a duration |
+| `src/transition.ts` | Transition options: their kinds, their keys, telling them apart, checking them, and resolving them into a duration and an easing function |
+| `src/playback-options.ts` | `AnimationPlaybackOptions`, `SequencePlaybackOptions`, `RepeatOptions`, `RepeatMode` and `Stagger`, their checks and their clamps |
 | `src/stagger.ts` | `stagger` and `StaggerOptions` |
-| `src/animation.ts` | `AnimationTiming`, `AnimationTimingDescriptor`, `animationTimingOf` and `TimedTweenAnimation`, with validation and clamping |
-| `src/at.ts` | `At`, `parseAt` and the parsed form |
+| `src/animation.ts` | `AnimationTiming`, `AnimationTimingDescriptor` and `TimedTweenTiming`, with validation and clamping |
+| `src/at.ts` | `At`, `PositionDescriptor`, `parsePositionDescriptor`, `checkPositionDescriptor` and `resolvePosition` |
 | `src/sequence.ts` | `SequenceTimingBuilder`, `SequenceTiming` and its entries, with validation and clamping |
 | `src/definitions.ts` | `animation`, `sequence`, `AnimationDefinition`, `SequenceDefinition`, `SequenceDefinitionBuilder`, and splitting timings per property |
 | `src/utils/validation.ts` | `checkNumber` and `checkPositive` |
 | `src/utils/math.ts` | Interpolation and solving monotone functions |
 | `src/utils/records.ts` | Reading numeric-keyed records in order |
-| `src/resolution/timings.ts` | `computeTimings`: the timing tree, entry paths and staggered delays |
+| `src/resolution/layout.ts` | `layoutOf`: the layout tree of starts and ends, entry paths and staggered delays |
 | `src/resolution/stops.ts` | `PropertyStops` and `StopValue`: one property's values along the progress, resolved later |
 | `src/resolution/track-runs.ts` | `TrackSpan` and `TrackRun`: a track's values over time, and their iterations |
-| `src/waapi/animator.ts` | `WAAPIAnimator`, which runs every step and creates the native animations, and `PlayOptions` |
+| `src/dom/mapping.ts` | What binds a timing to the DOM, for any DOM adapter: targets, value forms, mapping types, the mapping tree, `PlayOptions`, and resolving targets |
+| `src/waapi/animator.ts` | `WAAPIAnimator`, which runs every step and creates the native animations |
 | `src/waapi/controls.ts` | `AnimationControls`: playing, pausing, seeking and listening to the native animations together |
-| `src/waapi/mapping.ts` | Targets, value forms, mapping types, the mapping tree, and resolving targets |
 | `src/waapi/css-values.ts` | CSS property names, value types, each target's stops as CSS text, and the page's value resolver |
 | `src/waapi/effect-chains.ts` | The values stage: effect chains, and resolving their values to numbers in one unit |
 | `src/waapi/tracks.ts` | `AnimationTracksResolver`: repetitions, fill conflicts and values, over track runs |
@@ -629,11 +635,11 @@ definition.play(options?: PlayOptions): AnimationControls;
 WAAPIAnimator.play(timing, mappingTree, {scope = document.documentElement})
 │
 ├─ 1. Targets      resolveTargets                → Element[] per animation leaf
-├─ 2. Values       resolveTargetValues           → TargetValues[] per leaf (stops as CSS text)
-│                  target counts per leaf
-├─ 3. Timings      computeTimings(timing, counts)   → AnimationTimings | SequenceTimings | StaggeredSequenceTimings tree
-├─ 4. Tracks       AnimationTracksResolver.resolve(timings, valuesOf, domValueResolver)
-│     ├─ a. repetitions    → ScheduledEffect[]  (spans per target and property)
+├─ 2. Values       resolveElementValues          → ElementValues[] per leaf (stops as CSS text)
+│                  element counts per leaf
+├─ 3. Layout       layoutOf(timing, counts)      → AnimationLayout | SequenceLayout | StaggeredSequenceLayout tree
+├─ 4. Tracks       AnimationTracksResolver.resolve(layout, valuesOf, domValueResolver)
+│     ├─ a. repetitions    → ScheduledEffect[]  (spans per element and property)
 │     ├─ b. fill conflicts → PlacedEffect[]    (dropped effects, fill modes)
 │     ├─ c. values         → ResolvedEffect[]  (units, or values passed through as text)
 │     └─ d. easings        → NativeAnimationEffect[]  (keyframes, native easings)
@@ -642,7 +648,7 @@ WAAPIAnimator.play(timing, mappingTree, {scope = document.documentElement})
                    → AnimationControls
 ```
 
-When the adapter is given a single animation timing, it skips the per-leaf maps and resolves one `TargetValues[]`. When it's given a sequence, every animation leaf is keyed by its **entry path**: the names leading to it joined by `>`, such as `intro>logo>fade`. Names can't contain `>`, so paths can't collide. Sequences have no targets or values, so only leaves have keys.
+When the adapter is given a single animation timing, it skips the per-leaf maps and resolves one `ElementValues[]`. When it's given a sequence, every animation leaf is keyed by its **entry path**: the names leading to it joined by `>`, such as `intro>logo>fade`. Names can't contain `>`, so paths can't collide. Sequences have no targets or values, so only leaves have keys.
 
 ### 5.1 Targets
 
@@ -650,7 +656,7 @@ A selector is queried in the scope, and a function is called with it. Elements a
 
 ### 5.2 Values
 
-Each target gets its own stops, because units like `em`, `%` and `vw` depend on the element, and because an entry's missing 0 depends on what that element's track shows. Here the values only become CSS text. They're resolved to numbers in stage c (§5.6), once the tracks say which entry starts from which.
+Each element gets its own stops, because units like `em`, `%` and `vw` depend on the element, and because an entry's missing 0 depends on what that element's track shows. Here the values only become CSS text. They're resolved to numbers in stage c (§5.6), once the tracks say which entry starts from which.
 
 A property's **value type** comes from `CSS.supports`, tested against `1`, `1px`, `1%`, `1deg` and `1s`, and cached per property. It gives:
 - the **default unit** for a bare number: none when the property takes numbers, then `px`, then `deg`; otherwise a bare number throws;
@@ -658,23 +664,23 @@ A property's **value type** comes from `CSS.supports`, tested against `1`, `1px`
 
 Each stop holds a `StopValue`: its text, or none for a missing 0, and later its number. A missing 0 isn't `given`: it adopts the text of the value its track has as the entry starts, or only gets a number when the track is between stops then. Flipped stops, holds and every repeat share the same `StopValue`s, so resolving one resolves it everywhere.
 
-### 5.3 Timings
+### 5.3 Layout
 
-`computeTimings` returns a tree with the definition's levels. Times are local to the iteration of the sequence an entry is in, or start at 0 for the outermost definition.
+`layoutOf` lays the timing out in time: it returns a tree of starts and ends with the definition's levels. Times are local to the iteration of the sequence an entry is in, or start at 0 for the outermost definition.
 
 | Field | Meaning |
 |---|---|
 | `firstStart` | Position plus delay (an animation's shortest staggered delay, or a sequence's delay); a staggered sequence's earliest copy's |
 | `end` | Undefined when it never ends |
-| `lastReferenceableEnd` | See §2.8.2 |
+| `lastReferenceableEnd` | See §2.7.2 |
 | `playDuration` | One play of an animation, or one iteration of a sequence |
 | `totalDuration` | Plays and repeat delays without the delay; infinite when it never ends |
 
-Leaves also keep `targets`: each target's index and start, its position plus its delay. Inside a staggered sequence's copy, a leaf has only the target at the copy's index. A staggered sequence keeps a `SequenceTimings` per copy as `lanes`, and its own reach: `firstStart`, `end` and `lastReferenceableEnd`. A sequence never ends if it repeats forever or if any of its entries never ends.
+Leaves also keep `elements`: each element's index and start, its position plus its delay. Inside a staggered sequence's copy, a leaf has only the element at the copy's index. A staggered sequence keeps a `SequenceLayout` per copy as `lanes`, and its own reach: `firstStart`, `end` and `lastReferenceableEnd`. A sequence never ends if it repeats forever or if any of its entries never ends.
 
 ### 5.4 Tracks, stage a: repetitions
 
-**Spans and runs.** A `TrackSpan` is a stretch of one target's property, from `start` to `end`, whose value is `stops.valueAt(easing.progressAt(x))`. A hold is a span with constant stops and a linear easing. A `TrackRun` is spans one after another. `TrackRun.iteration(index, iterationDuration, options)` places a run in an iteration of a repeat. Every other iteration of a reverse or a mirror flips in time:
+**Spans and runs.** A `TrackSpan` is a stretch of one element's property, from `start` to `end`, whose value is `stops.valueAt(easing.progressAt(x))`. A hold is a span with constant stops and a linear easing. A `TrackRun` is spans one after another. `TrackRun.iteration(index, iterationDuration, options)` places a run in an iteration of a repeat. Every other iteration of a reverse or a mirror flips in time:
 - a reverse reverses each span's easing window;
 - a mirror keeps the easing and flips the stops.
 
@@ -686,7 +692,7 @@ Leaves also keep `targets`: each target's index and start, its position plus its
 
 **Plays without duration.** A play of 0 seconds is a span that starts and ends at the same time. Inside a longer effect it's two keyframes at the same offset, its start values and then its end values, so the track jumps. An effect of 0 seconds has two keyframes: the start values at 0 and the end values at 1. WAAPI shows the start values before it, if it fills backwards, and the end values from its start time on.
 
-Sequences apply their repetition to their children's runs after resolving all of them. Then everything is shifted into the parent's iteration by the sequence's first start, or a leaf's targets by their position plus their delay.
+Sequences apply their repetition to their children's runs after resolving all of them. Then everything is shifted into the parent's iteration by the sequence's first start, or a leaf's elements by their position plus their delay.
 
 **Native layout.** For a run from `a` to `b` in iterations of `L` with repeat delay `d`, where the period is `P = L + d`:
 
@@ -780,7 +786,8 @@ For each target, property and effect, in order, the adapter calls `element.anima
 | Mirror flips the progress and keeps the easing | That's what makes a mirrored spring settle the way it started |
 | Animations are unnamed; entries are named | The same animation can be placed many times |
 | Positions and references are local to each sequence | Entry names only need to be unique within their sequence |
-| Timings are resolved at adaptation | Staggers depend on the target count, which only the mapping gives |
+| The layout is resolved at adaptation | Staggers depend on the element count, which only the mapping gives |
+| Errors by kind: `RangeError`, `TypeError`, `SyntaxError`, `Error` | A caller can tell a bad number, a bad shape, a bad position and a bad state apart (§3.11) |
 | Leaves keyed by entry path | Definitions are reusable, so identity is the place in the tree, not the object |
 | Values resolved per target, through probes | Relative units depend on the element; probes are untouched by animations and give absolute values |
 | Values resolved after the fill conflicts | A missing 0 depends on which effect shows at the entry's start, and only interpolation needs numbers |
@@ -805,14 +812,14 @@ It compares the result with the definitions' own math, sampled at times that mis
 
 The cases cover single animations, sequence loops, reverses and mirrors with offset entries, and inner repeats baked inside outer ones. Easings are cubic Bézier (including overshoot), jump-start and jump-end steps, and springs. Layout, timing, fill and drop cases are checked exactly.
 
-`tests/animation.test.ts` covers timings: validation and clamping, telling transition kinds apart, splitting descriptors, and staggers. `tests/sequence.test.ts` covers positions (parsing, and resolving shares and `>>`), sequence timings, value forms, and definitions: naming, immutability, property splits and mapping trees.
+`tests/animation.test.ts` covers timings: validation and clamping, telling transition kinds apart, splitting descriptors, the `DampedSpring` factories, and staggers. `tests/sequence.test.ts` covers positions (parsing, one offset of each kind in order, and resolving every reference and share), sequence timings, targets, value forms, and definitions: naming, immutability, property splits and mapping trees.
 
 Effect chains are tested through a stand-in `CSSValueResolver` that takes plain numbers and gives every property a current value of 0.25. The DOM-dependent parts (targets, `domValueResolver`, probes and `element.animate`) have no tests yet, because the tests run without a DOM.
 
 ## 8. Limitations and open work
 
 - **Ending on the value underneath.** A missing 1 takes the last given value (§3.4), until §5.6 resolves it.
-- **Timed tween animations** exist as `TimedTweenAnimation`, which is internal and can't be placed in a sequence or played yet.
+- **Timed tweens** exist as `TimedTweenTiming`, which is internal and can't be placed in a sequence or played yet.
 - **The before flag.** Only an effect's own easing gets WAAPI's before flag. So an effect whose first keyframe starts with a jump, such as jump-start steps split by a stop or a reversed jump-end, shows the jumped value during its backwards fill.
 - **Continuations jump.** An infinite entry's continuation shows at whatever phase it has reached when it's uncovered.
 - **Shared properties in a natively repeating sequence** cover each other, because entries aren't merged.

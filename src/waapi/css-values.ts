@@ -1,8 +1,8 @@
 import {PropertyStops} from "../resolution/stops.js";
 import {checkNumber} from "../utils/validation.js";
 import type {CSSValueResolver} from "./effect-chains.js";
-import {type AnimationValues, type CSSValue, progressStopsOf} from "./mapping.js";
-import type {TargetValues} from "./tracks.js";
+import {type AnimationValues, type CSSValue, progressStopsOf} from "../dom/mapping.js";
+import type {ElementValues} from "./tracks.js";
 
 /** The CSS name of a property given in camelCase; a custom property is already given by it. */
 export function cssPropertyNameOf(property: string): string {
@@ -20,34 +20,34 @@ export function keyframePropertyOf(property: string): string {
     return property;
 }
 
-/** Each target's stops, as CSS text; a bare number takes the property's default unit. */
-export function resolveTargetValues(
-    targets: readonly Element[],
+/** Each element's stops, as CSS text; a bare number takes the property's default unit. */
+export function resolveElementValues(
+    elements: readonly Element[],
     values: AnimationValues
-): TargetValues[] {
+): ElementValues[] {
     const textStops = Object.entries(values).map(([property, valueStops]) => {
         const type = PropertyValueType.of(cssPropertyNameOf(property));
         const texts = progressStopsOf(property, valueStops).map(([progress, value]) => [progress, cssTextOf(property, value, type)]);
         return [property, Object.fromEntries(texts)] as const;
     });
-    return targets.map(target => ({
-        target,
+    return elements.map(element => ({
+        element,
         properties: Object.fromEntries(textStops.map(([property, texts]) => [property, PropertyStops.of(property, texts)]))
     }));
 }
 
 /** Resolves values on the page: its current values are computed styles, and its expressions resolve through probes. */
 export const domValueResolver: CSSValueResolver = {
-    currentValueOf: (target, property) => getComputedStyle(target).getPropertyValue(cssPropertyNameOf(property)).trim(),
+    currentValueOf: (element, property) => getComputedStyle(element).getPropertyValue(cssPropertyNameOf(property)).trim(),
     accepts: (property, text) => CSS.supports(cssPropertyNameOf(property), text),
-    resolve: (target, property, text) => PropertyValueType.of(cssPropertyNameOf(property)).resolve(target, text)
+    resolve: (element, property, text) => PropertyValueType.of(cssPropertyNameOf(property)).resolve(element, text)
 };
 
 function cssTextOf(property: string, value: CSSValue, type: PropertyValueType): string {
     if (typeof value === 'string') return value;
     checkNumber(value, `A value of "${property}"`);
     if (type.defaultUnit === undefined)
-        throw new Error(`"${property}" doesn't take a bare number, so ${value} needs a unit.`);
+        throw new TypeError(`"${property}" doesn't take a bare number, so ${value} needs a unit.`);
     return `${value}${type.defaultUnit}`;
 }
 
@@ -82,7 +82,7 @@ class PropertyValueType {
     private constructor(private readonly cssName: string) {
         const kinds = valueKinds.filter(({unit}) => CSS.supports(cssName, `1${unit}`));
         if (kinds.length === 0)
-            throw new Error(`"${cssName}" takes no number, length, percentage, angle or time.`);
+            throw new TypeError(`"${cssName}" takes no number, length, percentage, angle or time.`);
 
         const accepts = (unit: string) => kinds.some(kind => kind.unit === unit);
         this.defaultUnit = ['', 'px', 'deg'].find(accepts);
@@ -100,12 +100,12 @@ class PropertyValueType {
         return type;
     }
 
-    /** The value's computed form on the target. */
-    resolve(target: Element, text: string): string {
+    /** The value's computed form on the element. */
+    resolve(element: Element, text: string): string {
         const [probe, otherProbe] = this.probes();
-        const resolved = computedValueOf(target, probe, text);
-        if (resolved === this.initialValues[0] && computedValueOf(target, otherProbe, text) === this.initialValues[1])
-            throw new Error(`"${text}" doesn't resolve to a single number with a unit for "${this.cssName}".`);
+        const resolved = computedValueOf(element, probe, text);
+        if (resolved === this.initialValues[0] && computedValueOf(element, otherProbe, text) === this.initialValues[1])
+            throw new TypeError(`"${text}" doesn't resolve to a single number with a unit for "${this.cssName}".`);
         return resolved;
     }
 
@@ -127,16 +127,16 @@ class PropertyValueType {
     }
 }
 
-/** Sets the probe on the target with transitions off, reads its computed value, and puts the target's inline style back. */
-function computedValueOf(target: Element, probe: string, text: string): string {
-    const {style} = target as Element & ElementCSSInlineStyle;
+/** Sets the probe on the element with transitions off, reads its computed value, and puts the element's inline style back. */
+function computedValueOf(element: Element, probe: string, text: string): string {
+    const {style} = element as Element & ElementCSSInlineStyle;
     if (!style) throw new Error("Values can only be resolved on an element with an inline style.");
 
     const transition = style.getPropertyValue('transition');
     const transitionPriority = style.getPropertyPriority('transition');
     style.setProperty('transition', 'none', 'important');
     style.setProperty(probe, text);
-    const resolved = getComputedStyle(target).getPropertyValue(probe).trim();
+    const resolved = getComputedStyle(element).getPropertyValue(probe).trim();
     style.removeProperty(probe);
     if (transition) style.setProperty('transition', transition, transitionPriority);
     else style.removeProperty('transition');

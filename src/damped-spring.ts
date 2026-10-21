@@ -113,6 +113,13 @@ class OverdampedMotion implements SpringMotion {
     }
 }
 
+/** Apple's mapping: a positive bounce lowers the damping ratio from 1, and a negative one raises it past 1. */
+function dampingRatioOfBounce(bounce: number): number {
+    return bounce >= 0 ? 1 - bounce : 1 / (1 + bounce);
+}
+
+const maxRestingRounds = 16;
+
 /** A mass on a damped spring that starts at progress 0 and is pulled towards 1, in closed form throughout. */
 export class DampedSpring {
     private readonly motion: SpringMotion;
@@ -135,6 +142,29 @@ export class DampedSpring {
     /** From stiffness, damping and mass, as in `m·x″ = −k·x − c·x′`. */
     static physical(stiffness: number, damping: number, mass: number, initialVelocity: number): DampedSpring {
         return new DampedSpring(Math.sqrt(stiffness / mass), damping / (2 * Math.sqrt(stiffness * mass)), initialVelocity);
+    }
+
+    /** Shaped by `bounce`, swinging once, before damping, in `visualDuration`. */
+    static visual(visualDuration: Seconds, bounce: number, initialVelocity: number): DampedSpring {
+        return new DampedSpring(2 * Math.PI / visualDuration, dampingRatioOfBounce(bounce), initialVelocity);
+    }
+
+    /**
+     * Shaped by `bounce`, and coming within `restDelta` of its target for good exactly at `duration`.
+     * Its rest time shrinks in proportion as its natural frequency grows, except that the velocity, in progress per second, changes meaning with it; a few rounds settle that.
+     */
+    static restingAt(duration: Seconds, bounce: number, initialVelocity: number, restDelta: Progress): DampedSpring {
+        const dampingRatio = dampingRatioOfBounce(bounce);
+        const naturalFrequencyFor = (naturalFrequency: number) =>
+            new DampedSpring(1, dampingRatio, initialVelocity / naturalFrequency).restTime(restDelta) / duration;
+
+        let naturalFrequency = new DampedSpring(1, dampingRatio).restTime(restDelta) / duration;
+        for (let round = 0; round < maxRestingRounds; round++) {
+            const next = naturalFrequencyFor(naturalFrequency);
+            if (Math.abs(next - naturalFrequency) <= naturalFrequency * 1e-12) break;
+            naturalFrequency = next;
+        }
+        return new DampedSpring(naturalFrequency, dampingRatio, initialVelocity);
     }
 
     positionAt(time: Seconds): Progress {

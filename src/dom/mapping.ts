@@ -4,7 +4,12 @@ import {sortedByKey} from "../utils/records.js";
 export type CSSSelector = string;
 
 /** Elements, or what finds them in the scope. */
-export type Target = Element | Element[] | CSSSelector | ((scope: Element) => Element | Iterable<Element>);
+export type Target = Element | Iterable<Element> | CSSSelector | ((scope: Element) => Element | Iterable<Element>);
+
+export interface PlayOptions {
+    /** Where selectors and target functions look for elements; the document's root element by default. */
+    scope?: Element;
+}
 
 /** A number, a number with a unit, or a CSS expression that resolves to one. */
 export type CSSValue = number | string;
@@ -48,16 +53,16 @@ export function progressStopsOf(property: string, valueStops: ValueStops): [prog
         : Array.isArray(valueStops)
             ? listedStopsOf(valueStops)
             : sortedByKey(valueStops as { [progress: number]: CSSValue | null });
-    if (given.length === 0) throw new Error(`"${property}" has no values.`);
+    if (given.length === 0) throw new TypeError(`"${property}" has no values.`);
 
     given.forEach(([progress, value], index) => {
         if (!(progress >= 0 && progress <= 1))
             throw new RangeError(`"${property}" has a value at ${progress}, outside the 0–1 range.`);
         if (value === null && index !== 0 && index !== given.length - 1)
-            throw new Error(`"${property}" has a null between its ends; null only stands for the value underneath at the start or the end.`);
+            throw new TypeError(`"${property}" has a null between its ends; null only stands for the value underneath at the start or the end.`);
     });
     const stops = given.filter((stop): stop is [number, CSSValue] => stop[1] !== null);
-    if (stops.length === 0) throw new Error(`"${property}" has no values.`);
+    if (stops.length === 0) throw new TypeError(`"${property}" has no values.`);
     return stops;
 }
 
@@ -70,7 +75,7 @@ function listedStopsOf(values: readonly (CSSValue | null)[]): [number, CSSValue 
 export function resolveTargets(target: Target, scope: Element): Element[] {
     const elements = typeof target === 'string' ? [...scope.querySelectorAll(target)]
         : typeof target === 'function' ? elementsOf(target(scope))
-        : [target].flat();
+        : elementsOf(target);
     if (elements.length === 0)
         throw new Error(typeof target === 'string' ? `"${target}" matches no elements.` : "The target has no elements.");
     return [...new Set(elements)];

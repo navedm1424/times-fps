@@ -1,10 +1,10 @@
-import {AnimationTiming, type AnimationTimingDescriptor, animationTimingOf} from "./animation.js";
-import {type At, parseAt} from "./at.js";
-import {checkNewName, checkPosition, SequenceTiming, type SequenceTimingBuilder, type SequenceTimingEntries} from "./sequence.js";
+import {AnimationTiming, type AnimationTimingDescriptor} from "./animation.js";
+import type {At} from "./at.js";
+import {SequenceTiming, type SequenceTimingBuilder, type SequenceTimingEntries} from "./sequence.js";
 import type {SequencePlaybackOptions} from "./playback-options.js";
-import {type PlayOptions, WAAPIAnimator} from "./waapi/animator.js";
+import {WAAPIAnimator} from "./waapi/animator.js";
 import type {AnimationControls} from "./waapi/controls.js";
-import {type AnimationMapping, type AnimationValues, type MappingTree, type SequenceMapping, type SequenceMappingNode, type Target} from "./waapi/mapping.js";
+import {type AnimationMapping, type AnimationValues, type MappingTree, type SequenceMapping, type PlayOptions, type SequenceMappingNode, type Target} from "./dom/mapping.js";
 
 /** A timing for each property of the values. */
 export type PropertyTimings<Values extends AnimationValues> = {
@@ -45,31 +45,32 @@ export function sequence(timing?: SequenceTiming, mapping?: SequenceMapping<Sequ
 
 /** A timing bound to targets and values, ready to play any number of times. */
 export class AnimationDefinition {
-    readonly timing: AnimationTiming | { readonly [property: string]: AnimationTiming };
     /** @internal */
     readonly mappedTiming: MappedTiming;
 
     /** @internal */
     constructor(
-        readonly target: Target,
-        readonly values: AnimationValues,
+        target: Target,
+        values: AnimationValues,
         timing: AnimationTiming | AnimationTimingDescriptor | PropertyTimings<AnimationValues>
     ) {
         const mapping: AnimationMapping = {target, values};
         if (!isPropertyTimings(timing)) {
-            this.timing = animationTimingOf(timing);
-            this.mappedTiming = {timing: this.timing, mapping};
+            this.mappedTiming = {timing: timing instanceof AnimationTiming ? timing : AnimationTiming.of(timing), mapping};
             return;
         }
 
         const properties = Object.keys(values);
         const untimed = properties.find(property => !Object.hasOwn(timing, property));
-        if (untimed !== undefined) throw new Error(`"${untimed}" has no timing.`);
+        if (untimed !== undefined) throw new TypeError(`"${untimed}" has no timing.`);
         const unknown = Object.keys(timing).find(property => !Object.hasOwn(values, property));
-        if (unknown !== undefined) throw new Error(`"${unknown}" has a timing but no values.`);
+        if (unknown !== undefined) throw new TypeError(`"${unknown}" has a timing but no values.`);
 
-        this.timing = Object.fromEntries(properties.map(property => [property, animationTimingOf(timing[property]!)]));
-        this.mappedTiming = propertySplitOf(mapping, this.timing);
+        const timings = Object.fromEntries(properties.map(property => {
+            const propertyTiming = timing[property]!;
+            return [property, propertyTiming instanceof AnimationTiming ? propertyTiming : AnimationTiming.of(propertyTiming)];
+        }));
+        this.mappedTiming = propertySplitOf(mapping, timings);
     }
 
     play(options?: PlayOptions): AnimationControls {
@@ -79,13 +80,11 @@ export class AnimationDefinition {
 
 /** Timings laid out in time and bound to targets and values, ready to play any number of times. */
 export class SequenceDefinition {
-    readonly timing: SequenceTiming;
     /** @internal */
     readonly mappedTiming: MappedTiming;
 
     /** @internal */
     constructor(mappedTiming: { timing: SequenceTiming; mapping: SequenceMappingNode }) {
-        this.timing = mappedTiming.timing;
         this.mappedTiming = mappedTiming;
     }
 
@@ -126,9 +125,6 @@ export class SequenceDefinitionBuilder<Names extends string = never> {
     ): SequenceDefinitionBuilder<Names | N>;
     add(...args: InlineEntryArgs | DefinitionEntryArgs): SequenceDefinitionBuilder<string> {
         const [definition, {name, at}] = isDefinitionEntry(args) ? [args[0], args[1] ?? {}] : inlineEntryOf(args);
-        const givenNames = this.givenNames;
-        if (name !== undefined) checkNewName(name, givenNames);
-        checkPosition(name === undefined ? `Entry #${this.entries.length + 1}` : `Entry "${name}"`, parseAt(at ?? '>'), givenNames);
         return new SequenceDefinitionBuilder([...this.entries, {name, at, definition}]);
     }
 
@@ -197,20 +193,20 @@ function propertySplitOf(mapping: AnimationMapping, timings: { readonly [propert
 
 /** The mapping of a sequence timing as a tree; every entry must be mapped. */
 function mappingTreeOf(sequence: SequenceTiming, mapping: { readonly [name: string]: unknown } | undefined, path: string | undefined): SequenceMappingNode {
-    if (!mapping) throw new Error(path ? `No mapping present for "${path}".` : "No mapping present.");
+    if (!mapping) throw new TypeError(path ? `No mapping present for "${path}".` : "No mapping present.");
     const entries: { [name: string]: MappingTree } = {};
     for (const name of sequence.names) {
         const entry = sequence.entries[name]!;
         const entryPath = path ? `${path}>${name}` : name;
         const entryMapping = mapping[name];
-        if (!entryMapping) throw new Error(`No mapping present for "${entryPath}".`);
+        if (!entryMapping) throw new TypeError(`No mapping present for "${entryPath}".`);
         if ('sequence' in entry) {
             entries[name] = mappingTreeOf(entry.sequence, entryMapping as { readonly [name: string]: unknown }, entryPath);
             continue;
         }
         const {target, values} = entryMapping as AnimationMapping;
         if (target === undefined || values === undefined)
-            throw new Error(`The mapping of "${entryPath}" needs a target and values.`);
+            throw new TypeError(`The mapping of "${entryPath}" needs a target and values.`);
         entries[name] = {target, values};
     }
     return {entries, splitsProperties: false};
