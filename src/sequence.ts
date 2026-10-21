@@ -1,196 +1,114 @@
-import {remap, saturate} from "./utils/numbers.js";
-import {Segment} from "./segment.js";
+import {AnimationTiming, type AnimationTimingDescriptor, type TimedTweenTiming} from "./animation.js";
+import {type At, checkPositionDescriptor, parsePositionDescriptor, type PositionDescriptor} from "./at.js";
+import {checkPlaybackOptions, clampedDelay, clampedRepeats, type SequencePlaybackOptions} from "./playback-options.js";
 
-type DoComputeSubarray<
-    Remaining extends any[],
-    From extends number | any,
-    To extends number | any,
-    I extends null[] = [],
-    Output extends any[] = [],
-    Include extends boolean = From extends I["length"] | Remaining[0] ? true : false
-> = 0 extends Remaining["length"]
-    ? Output
-    : To extends I["length"] | Remaining[0]
-        ? Include extends true
-            ? [...Output, Remaining[0]]
-            : Output
-        : Remaining extends [infer H, ...infer Tail]
-            ? Include extends true
-                ? DoComputeSubarray<Tail, From, To, [...I, null], [...Output, H], true>
-                : From extends I["length"] | H
-                    ? DoComputeSubarray<Tail, From, To, [...I, null], [...Output, H], true>
-                    : DoComputeSubarray<Tail, From, To, [...I, null], Output>
-            : Output;
+export interface AnimationTimingEntry<N extends string = string> {
+    timing: AnimationTiming;
+    position: PositionDescriptor<N>;
+}
+export interface SubsequenceTimingEntry<NS extends SequenceTiming = SequenceTiming, N extends string = string> {
+    sequence: NS;
+    position: PositionDescriptor<N>;
+}
 
-type StrToNum<S extends string> = S extends `${infer N extends number}` ? N : never;
+export type SequenceTimingEntry = AnimationTimingEntry | SubsequenceTimingEntry;
 
-type TupleIndex<T extends readonly unknown[]> =
-    number extends T['length']
-        ? number
-        : StrToNum<Exclude<keyof T, keyof any[]> & string>;
+export type SequenceTimingEntries = {
+    readonly [name: string]: SequenceTimingEntry;
+};
 
-type ZeroIfNegative<N extends number> = `${N}` extends `-${number}` ? 0 : N;
+const SEQUENCE_TIMING_CONSTRUCTION_LICENSE = Symbol("SequenceTimingConstructionLicense");
 
-type ComputeSubarray<
-    Full extends any[],
-    From extends number | any,
-    To extends number | any
-> = /*Full["length"] extends 0
-    ? []
-    : */
-    To extends number
-        ? `${To}` extends `-${number}`
-            ? []
-            : From extends To
-                ? From extends TupleIndex<Full>
-                    ? [Full[From]] : []
-                : From extends number
-                    ? DoComputeSubarray<Full,
-                        From extends TupleIndex<Full> ? From : ZeroIfNegative<From>,
-                        To extends TupleIndex<Full> ? To : LengthMinusOne<Full>>
-                    : DoComputeSubarray<Full, From, To extends TupleIndex<Full> ? To : LengthMinusOne<Full>>
-        : From extends number
-            ? DoComputeSubarray<Full, From extends TupleIndex<Full> ? From : ZeroIfNegative<From>, To>
-            : DoComputeSubarray<Full, From, To>;
+function createSequenceTimingBuilder(): SequenceTimingBuilder {
+    return new (SequenceTimingBuilder as any)([], {}, SEQUENCE_TIMING_CONSTRUCTION_LICENSE);
+}
+function createSequenceTiming<Entries extends SequenceTimingEntries>(names: readonly string[], entries: Entries, options?: SequencePlaybackOptions): SequenceTiming<Entries> {
+    return new (SequenceTiming as any)(names, entries, options, SEQUENCE_TIMING_CONSTRUCTION_LICENSE);
+}
 
-type LengthMinusOne<L extends any[]> = string[] extends L ? number : L extends [...infer H, string] ? H["length"] : number;
-
-type Subsequence<S extends string[], From extends number | S[number] = 0, To extends number | S[number] = LengthMinusOne<S>> =
-    string[] extends S ? Sequence<S> : Sequence<ComputeSubarray<S, From, To>>;
-
-const SEQUENCE_CONSTRUCTION_LICENSE = Symbol("SequenceConstructionLicense")
-
-export class Sequence<S extends string[]> {
-    #brand = true;
-    readonly [key: number]: Segment;
-    readonly length: S["length"] extends number ? S["length"] : number;
-    readonly segments: {
-        readonly [K in S[number]]: Segment;
-    };
+/** Builds a sequence timing; every `add` gives a new builder, so branches never share entries. */
+export class SequenceTimingBuilder<SE extends SequenceTimingEntries = {}> {
+    #names: readonly string[];
+    #entries: SequenceTimingEntries;
 
     private constructor(
-        unstructuredSegments: { [K in keyof S]: [name: S[K], segment: Segment]; },
-        license?: typeof SEQUENCE_CONSTRUCTION_LICENSE
+        names: readonly string[] = [],
+        entries: SequenceTimingEntries = {},
+        license?: typeof SEQUENCE_TIMING_CONSTRUCTION_LICENSE
     ) {
-        if (license !== SEQUENCE_CONSTRUCTION_LICENSE)
-            throw new Error("A sequence can only be created using the factory methods.");
-
-        const segments = Object.create(null) as {
-            [K in S[number]]: Segment;
-        };
-        for (let i = 0; i < unstructuredSegments.length; i++) {
-            const segment: [S[number], Segment] = unstructuredSegments[i]!;
-            segments[segment[0]] = segment[1];
-            (this as any)[i] = segment[1];
-        }
-
-        this.length = unstructuredSegments.length;
-        this.segments = Object.freeze(segments);
-        Object.freeze(this);
+        if (license !== SEQUENCE_TIMING_CONSTRUCTION_LICENSE)
+            throw new TypeError(`Use ${SequenceTiming.name}.${SequenceTiming.builder.name} to create a ${SequenceTimingBuilder.name}.`);
+        this.#names = names;
+        this.#entries = entries;
     }
 
-    static fromRatios<const S extends [string, ...string[]]>(...ratios: { [K in keyof S]: [name: S[K], duration: number] }) {
-        if (!(Array.isArray(ratios) && ratios.length > 0))
-            throw new Error("A sequence must at least have one element.");
-        if (!ratios.every(s =>
-            Array.isArray(s)
-            && typeof (s[0]) === "string"
-            && typeof (s[1]) === "number"
-        ))
-            throw new Error("Invalid inputs: the first element of each tuple should be a string and the second element should be a number.");
-
-        return {
-            scaleToRange(start: number, end: number): Sequence<S> {
-                if (start > end)
-                    [start, end] = [end, start];
-                start = saturate(start);
-                end = saturate(end);
-                const segments = [] as { [K in keyof S]: [S[K], Segment] };
-                let totalTime = ratios.reduce(
-                    (acc, cur) => acc + Math.abs(cur[1]), 0
-                );
-                let currentTime = 0;
-                for (let i = 0; i < ratios.length; i++) {
-                    const interval = ratios[i]! as [S[number], number];
-                    const name = interval[0];
-                    const duration = Math.abs(interval[1]);
-                    segments[i] = [
-                        name,
-                        Segment.from(remap(currentTime, 0, totalTime, start, end))
-                            .to(remap(currentTime += duration, 0, totalTime, start, end))
-                    ];
-                }
-                return new Sequence(segments, SEQUENCE_CONSTRUCTION_LICENSE);
-            }
-        };
-    }
-    static [Symbol.hasInstance](value: any): value is Sequence<any> {
-        return typeof value === "object" && #brand in value && value.#brand;
+    #addEntry<N extends string>(name: N, entry: SequenceTimingEntry): SequenceTimingBuilder<SE & { [_ in N]: SequenceTimingEntry }> {
+        return new SequenceTimingBuilder([...this.#names, name], {...this.#entries, [name]: entry}, SEQUENCE_TIMING_CONSTRUCTION_LICENSE);
     }
 
-    get start(): number {
-        if (this.length === 0)
-            throw new Error("Invalid state: sequence instantiated with no segments.");
-        return this[0]!.start;
-    }
-    get end(): number {
-        if (this.length === 0)
-            throw new Error("Invalid state: sequence instantiated with no segments.");
-        return this[this.length - 1]!.end;
-    }
-    subsequence<From extends number | S[number] = 0, To extends number | S[number] = LengthMinusOne<S>>(
-        from: From = 0 as From, to: To = this.length - 1 as To
-    ): Subsequence<S, From, To> {
-        if (this.length === 0)
-            throw new Error("Invalid state: sequence instantiated with no segments.");
+    add<N extends string>(
+        name: N,
+        timing: AnimationTiming | AnimationTimingDescriptor,
+        at?: At<keyof SE & string>
+    ): SequenceTimingBuilder<SE & { [_ in N]: AnimationTimingEntry<keyof SE & string> }>;
 
-        const output: [name: string, Segment][] = [];
-        const segmentNames = Object.keys(this.segments);
-        let startPushing = false;
-        if (typeof from === "number" && typeof to === "number") {
-            if (to < from)
-                return new Sequence<any>(output, SEQUENCE_CONSTRUCTION_LICENSE);
-            if (Object.is(from, to) && from >= 0 && from < segmentNames.length) {
-                const segmentName = segmentNames[from]!;
-                output.push([segmentName, this.segments[segmentName]!]);
-                return new Sequence<any>(output, SEQUENCE_CONSTRUCTION_LICENSE);
-            }
-        }
-        if (typeof from === "number") {
-            if (from > segmentNames.length - 1)
-                return new Sequence<any>(output, SEQUENCE_CONSTRUCTION_LICENSE);
-            if (from < 0)
-                from = 0 as From;
-        }
-        if (typeof to === "number") {
-            if (to < 0)
-                return new Sequence<any>(output, SEQUENCE_CONSTRUCTION_LICENSE);
-            if (to > segmentNames.length - 1)
-                to = segmentNames.length - 1 as To;
-        }
+    // add<N extends string, A extends TimedTweenTiming<string[]>>(
+    //     name: N,
+    //     timing: A,
+    //     at?: At<keyof SE & string>
+    // ): SequenceTimingBuilder<SE & { [_ in N]: TimedTweenTimingEntry<A, keyof SE & string> }>;
 
-        for (let i = typeof from === "number" ? from : 0; i < segmentNames.length; i++) {
-            const segmentName = segmentNames[i]!;
-            if (Object.is(to, i) || Object.is(to, segmentName)) {
-                if (startPushing) output.push([segmentName, this.segments[segmentName]!]);
-                break;
-            }
-            if (startPushing || Object.is(from, i) || Object.is(from, segmentName)) {
-                startPushing = true;
-                output.push([segmentName, this.segments[segmentName]!]);
-            }
-        }
+    add<N extends string, NS extends SequenceTiming>(
+        name: N,
+        sequence: NS,
+        at?: At<keyof SE & string>
+    ): SequenceTimingBuilder<SE & { [_ in N]: SubsequenceTimingEntry<NS, keyof SE & string>; }>;
 
-        return new Sequence<any>(output, SEQUENCE_CONSTRUCTION_LICENSE);
+    add<N extends string>(
+        name: N,
+        timing: AnimationTiming | AnimationTimingDescriptor | SequenceTiming,
+        at?: At<string>
+    ): SequenceTimingBuilder<SE & { [_ in N]: SequenceTimingEntry }> {
+        checkNewName(name, this.#names);
+        const position = parsePositionDescriptor(at ?? '>');
+        checkPositionDescriptor(`Entry "${name}"`, position, this.#names);
+
+        const entry: SequenceTimingEntry = timing instanceof SequenceTiming
+            ? {sequence: timing, position}
+            : {timing: timing instanceof AnimationTiming ? timing : AnimationTiming.of(timing), position};
+        return this.#addEntry(name, entry);
     }
-    toArray(): Segment[] {
-        const result: Segment[] = [];
-        for (let i = 0; i < this.length; i++) {
-            result[i] = this[i]!;
-        }
-        return result;
+
+    build(options: SequencePlaybackOptions = {}): SequenceTiming<{ [K in keyof SE]: SE[K] }> {
+        if (this.#names.length === 0)
+            throw new Error("A sequence needs at least one entry.");
+        checkPlaybackOptions(options, "The sequence");
+        options = clampedDelay(clampedRepeats(options));
+        return createSequenceTiming(this.#names, this.#entries as { [K in keyof SE]: SE[K] }, options);
     }
 }
 
-Object.freeze(Sequence);
-Object.freeze(Sequence.prototype);
+/** Named timings laid out in time, without targets or values. */
+export class SequenceTiming<SE extends SequenceTimingEntries = SequenceTimingEntries> {
+    private constructor(
+        readonly names: readonly string[],
+        readonly entries: SE,
+        readonly options: SequencePlaybackOptions = {},
+        license?: typeof SEQUENCE_TIMING_CONSTRUCTION_LICENSE
+    ) {
+        if (license !== SEQUENCE_TIMING_CONSTRUCTION_LICENSE)
+            throw new TypeError(`A ${SequenceTiming.name} can only be created using ${SequenceTimingBuilder.name}.`);
+    }
+
+    static builder() {
+        return createSequenceTimingBuilder();
+    }
+}
+
+/** A name must be unique among the entries before it, and only contain letters, digits and underscores. */
+export function checkNewName(name: string, earlierNames: readonly string[]): void {
+    if (earlierNames.includes(name))
+        throw new Error(`An entry named "${name}" already exists in this sequence.`);
+    if (!/^\w+$/.test(name))
+        throw new Error(`The entry name "${name}" can only contain letters, digits and underscores.`);
+}

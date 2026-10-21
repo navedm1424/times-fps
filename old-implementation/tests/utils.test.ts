@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {assignReadonlyProperties, makePropertiesReadonly} from "../src/utils/objects.runtime.js";
+import {assignReadonlyProperties, makePropertiesReadonly} from "../utils/objects.runtime.js";
 
 describe("object", () => {
     describe("assignReadonlyProperties", () => {

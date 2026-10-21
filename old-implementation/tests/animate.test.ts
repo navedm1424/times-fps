@@ -6,9 +6,9 @@ import {
     type TimelineProgress,
     Segment,
     Sequence,
-} from "../src/index.js";
-import {createTimelineInspector} from "../src/timeline-inspector.runtime.js";
-import {createInterpolator} from "../src/interpolator.runtime.js";
+} from "../index.js";
+import {createTimelineInspector} from "../timeline-inspector.runtime.js";
+import {createInterpolator} from "../interpolator.runtime.js";
 
 describe("easing", () => {
     describe("cubicBezierEasing", () => {

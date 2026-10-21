@@ -1,5 +1,5 @@
 import {describe, it, expect} from "vitest";
-import {invLerp, lerp, remap, saturate} from "../src/index.js";
+import {invLerp, lerp, remap, saturate} from "../index.js";
 
 describe("numbers", () => {
     describe("saturate", () => {

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import {createFrameSampler} from "../src/index.js";
-import {FrameExporter as FrameExporterNode} from "../src/exporter/frame-exporter-node.runtime.js";
-import {FrameExporter} from "../src/exporter/frame-exporter.js";
+import {createFrameSampler} from "../index.js";
+import {FrameExporter as FrameExporterNode} from "../exporter/frame-exporter-node.runtime.js";
+import {FrameExporter} from "../exporter/frame-exporter.js";
 
 describe(`${FrameExporterNode.exportToJson.name}`, () => {
     it("writes JSON file in Node", async () => {

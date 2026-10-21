@@ -1,26 +1,28 @@
 {
-  "name": "times-fps",
-  "version": "1.0.0-alpha",
-  "description": "A tiny toolkit for designing animations and precomputing frames.",
+  "name": "timesfps",
+  "version": "1.0.0-alpha.0",
+  "description": "Truly fluid spring motion on WAAPI, no `linear()` approximations. Yoyo and mirror repeats, repeat delays, and nested repeats. All natively played.",
   "keywords": [
     "animation",
+    "web-animations-api",
+    "waapi",
+    "spring",
+    "spring-animation",
+    "spring-physics",
+    "native-animation",
+    "motion",
+    "motion-design",
+    "animation-sequence",
     "timeline",
-    "frames",
-    "fps",
-    "easing",
-    "interpolation",
-    "interpolator"
+    "keyframes",
+    "easing"
   ],
   "license": "MIT",
   "author": "Naved <navedm1424@gmail.com>",
   "type": "module",
   "main": "dist/index.js",
   "exports": {
-    ".": "./dist/index.js",
-    "./exporter": {
-      "node": "./dist/exporter/frame-exporter-node.runtime.js",
-      "default": "./dist/exporter/frame-exporter.js"
-    }
+    ".": "./dist/index.js"
   },
   "files": ["dist"],
   "sideEffects": false,
@@ -28,7 +30,8 @@
     "prebuild": "rm -rf dist/",
     "build": "tsc",
     "postbuild": "find dist \\( -name \"*.types.js\" -o -name \"*.runtime.d.ts\" \\) -delete",
-    "prepack": "rm -f ${npm_package_name}-${npm_package_version}.tgz"
+    "prepack": "rm -f ${npm_package_name}-${npm_package_version}.tgz",
+    "test": "vitest run"
   },
   "repository": {
     "type": "git",
