@@ -3,9 +3,9 @@ import {AnimationTiming} from "../src/animation.ts";
 import {CubicBezierEasing, type Easing, StepsEasing} from "../src/easing.ts";
 import {linear, resolveEasing} from "../src/easing-specifier.ts";
 import {PropertyStops, type NumericValueStops} from "../src/resolution/stops.ts";
-import {layoutOf, type EntryPath, type SequenceLayout} from "../src/resolution/layout.ts";
-import {SequenceTiming} from "../src/sequence.ts";
-import type {AnimationPlaybackOptions, RepeatOptions} from "../src/playback-options.ts";
+import {layoutOf, type SequenceLayout} from "../src/resolution/layout.ts";
+import {type EntryPath, SequenceTiming} from "../src/sequence.ts";
+import type {PlaybackOptions, RepeatOptions} from "../src/playback-options.ts";
 import {resolveTransition, type TransitionOptions} from "../src/transition.ts";
 import {lerp} from "../src/utils/math.ts";
 import type {NativeAnimationEffect, NativeKeyframe} from "../src/waapi/native-effects.ts";
@@ -173,7 +173,7 @@ describe("layoutOf", () => {
 describe("AnimationTracksResolver layouts", () => {
     const play = {duration: 1};
     const effectsOf = (animation: AnimationTiming) => animationTracksOf(animation).get(element)!.x!;
-    const repeats = (options: AnimationPlaybackOptions) => effectsOf(AnimationTiming.of(play, {repeatDelay: 0.5, ...options}));
+    const repeats = (options: PlaybackOptions) => effectsOf(AnimationTiming.of(play, {repeatDelay: 0.5, ...options}));
 
     it("plays once with the easing on the effect and the stops as keyframes", () => {
         const [effect, ...rest] = effectsOf(AnimationTiming.of({duration: 1, easing: 'easeInOut'}));

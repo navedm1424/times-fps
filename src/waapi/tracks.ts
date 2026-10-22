@@ -1,5 +1,6 @@
 import type {PropertyStops} from "../resolution/stops.ts";
-import {type AnimationLayout, entryPathOf, type EntryPath, type LayoutNode, type SequenceLayout} from "../resolution/layout.ts";
+import {type AnimationLayout, type LayoutNode, type SequenceLayout} from "../resolution/layout.ts";
+import {entryPathOf, type EntryPath} from "../sequence.ts";
 import {TrackRun} from "../resolution/track-runs.ts";
 import type {Seconds} from "../types.ts";
 import {type CSSValueResolver, resolveEffectChains} from "./effect-chains.ts";
@@ -108,7 +109,7 @@ export class AnimationTracksResolver {
             const runs = Object.entries(properties).map(([property, stops]): KeyedRun =>
                 ({element, property, path, entryStops: stops, order, run: TrackRun.play(playDuration, easing, stops)})
             );
-            const repeated = AnimationTracksResolver.repeated({runs, effects: []}, playDuration, timing.options, repeatingAncestor, order.length);
+            const repeated = AnimationTracksResolver.repeated({runs, effects: []}, playDuration, timing.playback, repeatingAncestor, order.length);
             const placed = AnimationTracksResolver.shifted(repeated, start);
             contribution.runs.push(...placed.runs);
             contribution.effects.push(...placed.effects);
@@ -117,15 +118,15 @@ export class AnimationTracksResolver {
     }
 
     private resolveSequenceRepetitions(layout: SequenceLayout, path: EntryPath | undefined, order: readonly number[], repeatingAncestor: boolean): Contribution {
-        const {options} = layout.sequence;
-        const repeats = (options.repeat ?? 0) > 0;
+        const {playback} = layout.sequence;
+        const repeats = (playback.repeat ?? 0) > 0;
         const children: Contribution = {runs: [], effects: []};
         [...layout.entries].forEach(([name, entryLayout], index) => {
             const child = this.scheduleRepetitions(entryLayout, entryPathOf(path, name), [...order, index], repeatingAncestor || repeats);
             children.runs.push(...child.runs);
             children.effects.push(...child.effects);
         });
-        const repeated = AnimationTracksResolver.repeated(children, layout.playDuration, options, repeatingAncestor, order.length);
+        const repeated = AnimationTracksResolver.repeated(children, layout.playDuration, playback, repeatingAncestor, order.length);
         return AnimationTracksResolver.shifted(repeated, layout.firstStart);
     }
 

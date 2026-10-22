@@ -1,5 +1,5 @@
 import {describe, it} from "vitest";
-import {animation, AnimationTiming, cubicBezier, type Definition, sequence, SequenceTiming, stagger, steps} from "../src/index.ts";
+import {animation, AnimationTiming, cubicBezier, type Definition, animator, sequence, SequenceTiming, stagger, steps} from "../src/index.ts";
 
 declare const heading: Element, first: Element, second: Element, featuredList: Element, archiveList: Element, element: Element, scope: Element;
 declare const definition: Definition;
@@ -7,24 +7,25 @@ const timing = {duration: 0.4};
 
 describe("the README's examples", () => {
     it("type-check as the entry points show them", () => {
-        animation('.card', {opacity: [0, 1], scale: [0.95, 1]}, {duration: 0.4, easing: 'easeOut'}).play();
-        animation('.dot', {scale: [1, 1.4]}, {
+        const page = animator();
+        page.animate('.card', {opacity: [0, 1], scale: [0.95, 1]}, {duration: 0.4, easing: 'easeOut'});
+        page.animate('.dot', {scale: [1, 1.4]}, {
             visualDuration: 0.3, bounce: 0.4,
             delay: stagger(0.05, {from: 'center'}),
             repeat: Infinity, repeatMode: 'mirror', repeatDelay: 0.6
-        }).play();
-        sequence()
+        });
+        const intro = sequence()
             .add('h1', {opacity: [0, 1], translate: [-40, 0]}, {duration: 0.6, bounce: 0.2}, {name: 'title'})
             .add('h2', {opacity: [0, 1]}, {duration: 0.4, easing: 'easeOut'}, {at: '-0.3'})
             .add('#cta', {scale: [0.8, 1]}, {stiffness: 300, damping: 20}, {at: 'title<+50%'})
-            .build({repeat: 1, repeatMode: 'reverse'})
-            .play();
+            .build({repeat: 1, repeatMode: 'reverse'});
+        page.animate(intro);
         const cards = sequence()
             .add('.card', {translate: [40, 0]}, {duration: 0.6, bounce: 0.2}, {name: 'lift'})
             .add('.card .icon', {opacity: [0, 1]}, {duration: 0.3}, {at: 'lift<+25%'})
             .build({delay: stagger(0.1)});
-        cards.play({scope: featuredList});
-        cards.play({scope: archiveList});
+        animator({scope: featuredList}).animate(cards);
+        animator({scope: archiveList}).animate(cards);
     });
 
     it("type-check as `animation` shows its targets, values and timing", () => {
@@ -50,11 +51,6 @@ describe("the README's examples", () => {
         stagger({step: 0.05, from: 'last', easing: 'easeOut'});
         stagger(0.05);
         stagger(0.05, {from: 'last', easing: 'easeOut'});
-
-        animation('.card', {translate: [40, 0], opacity: [0, 1]}, {
-            translate: {duration: 0.6, bounce: 0.2},
-            opacity: {duration: 0.2}
-        }).play();
     });
 
     it("type-check as `sequence` shows its entries, positions, nesting and staggers", () => {
@@ -71,11 +67,11 @@ describe("the README's examples", () => {
             .add(intro, {name: 'intro'})
             .add(card, {at: '-0.2'})
             .build();
-        sequence()
+        const cards = sequence()
             .add('.card', {scale: [1, 1.05]}, {duration: 0.3}, {name: 'lift'})
             .add('.card .icon', {opacity: [0, 1]}, {duration: 0.5})
-            .build({delay: stagger(0.1)})
-            .play();
+            .build({delay: stagger(0.1)});
+        animator().animate(cards);
 
         const positions = [
             '', '>', '<', '<<', '>>', 1.5, '+0.2', '<-0.1', '<+25%', '-25%', '<<+50%', '>>-25%', '-=25%', '>>+=10%', '<+50%-=50%+0.1'
@@ -99,14 +95,20 @@ describe("the README's examples", () => {
             .add({duration: 0.4, easing: 'easeOut'}, 'subtitle', '-0.3')
             .add({stiffness: 300, damping: 20}, 'cta', 'title<+50%')
             .build({repeat: 1, repeatMode: 'reverse'});
-        sequence(reveal, {
-            title: {target: 'h1', values: {opacity: [0, 1], translate: [-40, 0]}},
-            subtitle: {target: 'h2', values: {opacity: [0, 1]}},
-            cta: {target: '#cta', values: {scale: [0.8, 1]}}
-        }).play();
+        animator().animate(reveal, {
+            title: ['h1', {opacity: [0, 1], translate: [-40, 0]}],
+            subtitle: ['h2', {opacity: [0, 1]}],
+            cta: ['#cta', {scale: [0.8, 1]}]
+        });
+        animator().animate(sequence(reveal, {
+            title: ['h1', {opacity: [0, 1]}],
+            subtitle: ['h2', {opacity: [0, 1]}],
+            cta: ['#cta', {scale: [0.8, 1]}]
+        }));
 
-        definition.play({scope});
-        animation(element, {opacity: [0, 1]}, {duration: 0.4, easing: 'easeOut', repeat: 2, repeatMode: 'reverse'}).play();
+        animator({scope}).animate(definition);
+        animator().animate('.card', {opacity: [0, 1]}, {duration: 0.6, bounce: 0.2, delay: stagger(0.1)});
+        animator().animate(element, {opacity: [0, 1]}, {duration: 0.4, easing: 'easeOut', repeat: 2, repeatMode: 'reverse'});
     });
 
     it("reject what the README says the types reject", () => {
@@ -118,11 +120,11 @@ describe("the README's examples", () => {
         sequence().add('h1', {opacity: 1}, timing, {at: '<+1-1'});
         // @ts-expect-error: offsets out of order
         sequence().add('h1', {opacity: 1}, timing, {at: '<-1+50%'});
-        // @ts-expect-error: every property needs a timing
-        animation('.card', {translate: [40, 0], opacity: [0, 1]}, {translate: {duration: 0.6}});
         const reveal = SequenceTiming.builder().add(timing, 'title').add(timing, 'subtitle').build();
         // @ts-expect-error: the mapping names every entry
-        sequence(reveal, {title: {target: 'h1', values: {opacity: 1}}});
+        sequence(reveal, {title: ['h1', {opacity: 1}]});
+        // @ts-expect-error: the mapping names every entry, when it's played too
+        animator().animate(reveal, {title: ['h1', {opacity: 1}]});
         // @ts-expect-error: a stagger takes step or spread, not both
         stagger({step: 0.1, spread: 1});
         // @ts-expect-error: spread is only given by name

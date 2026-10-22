@@ -3,9 +3,9 @@ import {DampedSpring} from "./damped-spring.ts";
 import {type Easing, SpringEasing} from "./easing.ts";
 import {checkEasingSpecifier, type EasingSpecifier, linear, resolveEasing} from "./easing-specifier.ts";
 import type {Progress, Seconds} from "./types.ts";
-import {checkNumber, checkPositive} from "./utils/validation.ts";
+import {checkNumber, checkPositive, requireNumber, requireProperty} from "./utils/validation.ts";
 
-type ElementOf<A extends readonly string[]> = A extends readonly (infer Element)[] ? Element : never;
+type ElementOf<A extends readonly string[]> = A extends readonly (infer ArrayElement)[] ? ArrayElement : never;
 
 const groupedTransitionKeys = {
     eased: ['duration', 'easing'],
@@ -27,27 +27,31 @@ export interface EasedTransitionOptions extends OtherKeysExcluded<"eased"> {
     easing?: EasingSpecifier;
 }
 
+interface SharedSpringOptions {
+    /** Normalized change per second */
+    velocity?: number;
+}
+
 /** Shaped by `bounce` and stretched so it comes to rest at the end of `duration`. */
-export interface DurationSpringTransitionOptions extends OtherKeysExcluded<"durationSpring"> {
+export interface DurationSpringTransitionOptions extends SharedSpringOptions, OtherKeysExcluded<"durationSpring"> {
     duration: Seconds;
-    bounce: number;            // 0 = no overshoot
-    velocity?: number;         // progress per second
+    /** 0 = no overshoot */
+    bounce: number;
 }
 
 /** Shaped by `bounce`, with `visualDuration` setting how fast it swings; it runs on past it until it comes to rest. */
-export interface VisualSpringTransitionOptions extends OtherKeysExcluded<"visualSpring"> {
+export interface VisualSpringTransitionOptions extends SharedSpringOptions, OtherKeysExcluded<"visualSpring"> {
     visualDuration: Seconds;
-    bounce: number;            // 0 = no overshoot
-    velocity?: number;         // progress per second
+    /** 0 = no overshoot */
+    bounce: number;
 }
 
 /** Works out its own duration. */
-export interface PhysicalSpringTransitionOptions extends OtherKeysExcluded<"physicalSpring"> {
+export interface PhysicalSpringTransitionOptions extends SharedSpringOptions, OtherKeysExcluded<"physicalSpring"> {
     stiffness: number;
     damping: number;
     mass?: number;
-    velocity?: number;         // progress per second
-    restDelta?: Progress;      // defaults to `PRECISION`
+    restDelta?: Progress;
 }
 
 export type SpringTransitionOptions = DurationSpringTransitionOptions | VisualSpringTransitionOptions | PhysicalSpringTransitionOptions;
@@ -108,6 +112,7 @@ export function checkTransitionOptions(transition: TransitionOptions, label: str
             return;
         }
         case 'visualSpring':
+            requireProperty(transition, 'bounce', `${label}'s bounce`);
             checkBounce(transition.bounce, label);
             checkPositive(transition.visualDuration, `${label}'s visual duration`);
             return;
@@ -124,20 +129,22 @@ function checkBounce(bounce: number | undefined, label: string): void {
         throw new RangeError(`${label}'s bounce must be between -1 and 1, not ${bounce}.`);
 }
 
-function requireNumber(value: number | undefined, label: string): asserts value is number {
-    if (typeof value !== 'number') throw new TypeError(`${label} is required.`);
+/** A transition as it plays: how long one play lasts, and the easing it runs. */
+export interface TransitionDescriptor {
+    duration: Seconds;
+    easing: Easing;
 }
 
-const resolvedTransitions = new WeakMap<TransitionOptions, { duration: Seconds; easing: Easing }>();
+const resolvedTransitions = new WeakMap<TransitionOptions, TransitionDescriptor>();
 
 /** How long one play of the transition lasts, and the easing it runs; each transition is resolved once. */
-export function resolveTransition(transition: TransitionOptions): { duration: Seconds; easing: Easing } {
+export function resolveTransition(transition: TransitionOptions): TransitionDescriptor {
     let resolved = resolvedTransitions.get(transition);
     if (!resolved) resolvedTransitions.set(transition, resolved = resolvedTransitionOf(transition));
     return resolved;
 }
 
-function resolvedTransitionOf(transition: TransitionOptions): { duration: Seconds; easing: Easing } {
+function resolvedTransitionOf(transition: TransitionOptions): TransitionDescriptor {
     switch (transitionKindOf(transition)) {
         case 'eased': {
             const {duration, easing} = transition as EasedTransitionOptions;
@@ -145,11 +152,11 @@ function resolvedTransitionOf(transition: TransitionOptions): { duration: Second
         }
         case 'physicalSpring': {
             const {stiffness, damping, mass = 1, velocity = 0, restDelta = PRECISION} = transition as PhysicalSpringTransitionOptions;
-            return springTimingOf(DampedSpring.physical(stiffness, damping, mass, velocity), restDelta);
+            return transitionDescriptorOf(DampedSpring.physical(stiffness, damping, mass, velocity), restDelta);
         }
         case 'visualSpring': {
             const {visualDuration, bounce, velocity = 0} = transition as VisualSpringTransitionOptions;
-            return springTimingOf(DampedSpring.visual(visualDuration, bounce, velocity), PRECISION);
+            return transitionDescriptorOf(DampedSpring.visual(visualDuration, bounce, velocity), PRECISION);
         }
         case 'durationSpring': {
             const {duration, bounce, velocity = 0} = transition as DurationSpringTransitionOptions;
@@ -159,7 +166,7 @@ function resolvedTransitionOf(transition: TransitionOptions): { duration: Second
 }
 
 /** A spring runs until it comes to rest. */
-function springTimingOf(spring: DampedSpring, restDelta: Progress): { duration: Seconds; easing: Easing } {
+function transitionDescriptorOf(spring: DampedSpring, restDelta: Progress): TransitionDescriptor {
     const duration = spring.restTime(restDelta);
     return {duration, easing: new SpringEasing(spring, duration)};
 }

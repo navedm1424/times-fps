@@ -2,17 +2,9 @@ import type {AnimationTiming} from "../animation.ts";
 import type {Easing} from "../easing.ts";
 import {resolveTransition} from "../transition.ts";
 import {type EntrySpan, resolvePosition} from "../at.ts";
-import {SequenceTiming} from "../sequence.ts";
+import {entryPathOf, type EntryPath, SequenceTiming} from "../sequence.ts";
 import type {Seconds} from "../types.ts";
-import {checkNumber} from "../utils/validation.ts";
-import type {RepeatOptions, Stagger} from "../playback-options.ts";
-
-/** An animation leaf's key in a sequence: the names of the entries leading to it, joined by `>`. */
-export type EntryPath = string;
-
-export function entryPathOf(parentPath: EntryPath | undefined, name: string): EntryPath {
-    return parentPath ? `${parentPath}>${name}` : name;
-}
+import type {RepeatOptions} from "../playback-options.ts";
 
 /**
  * One copy of a staggered sequence: the copy at `index` plays the element at that index of each of its animations.
@@ -83,20 +75,12 @@ export function layoutOf(
     return animationLayout(timing, 0, undefined, elementCounts, undefined);
 }
 
-/** Each element's delay; a staggered one that's negative becomes 0. */
-export function staggeredDelays(delay: Seconds | Stagger, elementCount: number): Seconds[] {
-    return Array.from({length: elementCount}, (_, index) => {
-        if (typeof delay === 'number') return delay;
-        return Math.max(0, checkNumber(delay(index, elementCount), `The staggered delay of element ${index}`));
-    });
-}
-
 function animationLayout(timing: AnimationTiming, position: Seconds, path: EntryPath | undefined, elementCount: number, lane: Lane | undefined): AnimationLayout {
     if (lane && elementCount !== lane.count)
         throw new Error(`Entry "${path}" has ${elementCount} elements, but the staggered sequence it's in plays ${lane.count}.`);
 
-    const {delay = 0, ...repeatOptions} = timing.options;
-    const delays = staggeredDelays(delay, elementCount);
+    const {delay = 0, ...repeatOptions} = timing.playback;
+    const delays = typeof delay === 'number' ? Array<Seconds>(elementCount).fill(delay) : delay(elementCount);
     const elements = (lane ? [lane.index] : delays.map((_, index) => index)).map(index => ({index, start: position + delays[index]!}));
     const firstStart = elements.length ? Math.min(...elements.map(({start}) => start)) : position;
     const latestStart = elements.length ? Math.max(...elements.map(({start}) => start)) : position;
@@ -123,18 +107,18 @@ function sequenceLayout(
     elementCounts: ReadonlyMap<EntryPath, number>,
     lane: Lane | undefined
 ): SequenceLayout | StaggeredSequenceLayout {
-    const {delay = 0, ...repeatOptions} = sequence.options;
+    const {delay = 0, ...repeatOptions} = sequence.playback;
     if (typeof delay !== 'number' && !lane)
         return staggeredSequenceLayout(sequence, position, path, elementCounts);
 
     const entries = new Map<string, LayoutNode>();
     const entrySpans = new Map<string, EntrySpan>();
-    for (const name of sequence.names) {
-        const entry = sequence.entries[name]!;
+    for (const entry of sequence.entries) {
+        const {name} = entry;
         const entryPath = entryPathOf(path, name);
         const layoutAt = (entryPosition: Seconds): LayoutNode => 'sequence' in entry
             ? sequenceLayout(entry.sequence, entryPosition, entryPath, elementCounts, lane)
-            : animationLayout(entry.timing, entryPosition, entryPath, elementCountOf(entryPath, elementCounts), lane);
+            : animationLayout(entry.animation, entryPosition, entryPath, elementCountOf(entryPath, elementCounts), lane);
         const selfDuration = entry.position.offset.selfFraction ? entrySpanOf(layoutAt(0)).duration : 0;
         const entryPosition = Math.max(0, resolvePosition(entry.position, entrySpans, selfDuration));
 
@@ -143,7 +127,7 @@ function sequenceLayout(
         entrySpans.set(name, entrySpanOf(layout));
     }
 
-    const ownDelay = typeof delay === 'number' ? delay : staggeredDelays(delay, lane!.count)[lane!.index]!;
+    const ownDelay = typeof delay === 'number' ? delay : delay(lane!.count)[lane!.index]!;
     const iterationStart = position + ownDelay;
     const playDuration = Math.max(0, ...[...entries.values()].map(entry => entry.lastReferenceableEnd));
     const playsDuration = repeatedDuration(playDuration, repeatOptions);
@@ -189,9 +173,8 @@ function staggeredSequenceLayout(
 }
 
 function leafPathsOf(sequence: SequenceTiming, path: EntryPath | undefined): EntryPath[] {
-    return sequence.names.flatMap(name => {
-        const entry = sequence.entries[name]!;
-        const entryPath = entryPathOf(path, name);
+    return sequence.entries.flatMap(entry => {
+        const entryPath = entryPathOf(path, entry.name);
         return 'sequence' in entry ? leafPathsOf(entry.sequence, entryPath) : [entryPath];
     });
 }

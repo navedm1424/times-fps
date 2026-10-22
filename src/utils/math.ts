@@ -4,13 +4,13 @@ export function lerp(from: number, to: number, amount: number): number {
 }
 
 /** The amount at which `lerp` from `from` to `to` gives `value`. */
-export function invLerp(value: number, from: number, to: number): number {
+export function invLerp(from: number, to: number, value: number): number {
     return (value - from) / (to - from);
 }
 
 /** Maps `value` from the range `fromStart`–`fromEnd` onto the range `toStart`–`toEnd`. */
 export function remap(value: number, fromStart: number, fromEnd: number, toStart: number, toEnd: number): number {
-    return lerp(toStart, toEnd, invLerp(value, fromStart, fromEnd));
+    return lerp(toStart, toEnd, invLerp(fromStart, fromEnd, value));
 }
 
 /**

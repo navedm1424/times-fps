@@ -1,8 +1,10 @@
 import {
-    type AnimationPlaybackOptions,
     checkPlaybackOptions,
     clampedDelay,
     clampedRepeats,
+    type PlaybackDescriptor,
+    playbackDescriptorOf,
+    type PlaybackOptions,
     type RepeatOptions
 } from "./playback-options.ts";
 import {checkTransitionOptions, isTransitionKey, type TransitionOptions} from "./transition.ts";
@@ -10,27 +12,27 @@ import type {Seconds} from "./types.ts";
 import {checkNumber} from "./utils/validation.ts";
 
 /** A transition with the options of its timing spread into it. */
-export type AnimationTimingOptions = TransitionOptions & AnimationPlaybackOptions;
+export type AnimationTimingOptions = TransitionOptions & PlaybackOptions;
 
 /** One play through the transition, with its delay and repeats. */
 export class AnimationTiming {
-    readonly options: AnimationPlaybackOptions;
+    readonly playback: PlaybackDescriptor;
 
-    private constructor(readonly transition: TransitionOptions, options: AnimationPlaybackOptions = {}) {
+    private constructor(readonly transition: TransitionOptions, options: PlaybackOptions = {}) {
         checkPlaybackOptions(options, "The timing");
         checkTransitionOptions(transition, "The timing's transition");
-        this.options = clampedDelay(clampedRepeats(options));
+        this.playback = playbackDescriptorOf(options);
     }
 
     /** A descriptor is split by key into its transition and its options. */
     static of(timing: AnimationTimingOptions): AnimationTiming;
-    static of(transition: TransitionOptions, options?: AnimationPlaybackOptions): AnimationTiming;
-    // static of<T extends string[]>(tweens: { [I in keyof T]: TimedTween<T[I]>; }, options?: AnimationPlaybackOptions): TimedTweenTiming<T>;
-    // static of<T extends string[]>(transition: TransitionOptions, tweens: { [I in keyof T]: RatioTween<T[I]>; }, options?: AnimationPlaybackOptions): SelfTimedTiming<T>;
-    static of(transition: TransitionOptions | AnimationTimingOptions, options?: AnimationPlaybackOptions): AnimationTiming {
+    static of(transition: TransitionOptions, options?: PlaybackOptions): AnimationTiming;
+    // static of<T extends string[]>(tweens: { [I in keyof T]: TimedTween<T[I]>; }, options?: PlaybackOptions): TimedTweenTiming<T>;
+    // static of<T extends string[]>(transition: TransitionOptions, tweens: { [I in keyof T]: RatioTween<T[I]>; }, options?: PlaybackOptions): SelfTimedTiming<T>;
+    static of(transition: TransitionOptions | AnimationTimingOptions, options?: PlaybackOptions): AnimationTiming {
         const entries = Object.entries(transition).filter(([, value]) => value !== undefined);
         const transitionOptions = Object.fromEntries(entries.filter(([key]) => isTransitionKey(key))) as TransitionOptions;
-        const playbackOptions = Object.fromEntries(entries.filter(([key]) => !isTransitionKey(key))) as AnimationPlaybackOptions;
+        const playbackOptions = Object.fromEntries(entries.filter(([key]) => !isTransitionKey(key))) as PlaybackOptions;
         return new AnimationTiming(transitionOptions, {...playbackOptions, ...options});
     }
 }
@@ -39,7 +41,7 @@ export class AnimationTiming {
  * `repeat` must be finite.
  * @internal
  */
-export interface TimedTween<Name extends string = string> extends RepeatOptions {
+interface TimedTween<Name extends string = string> extends RepeatOptions {
     name: Name;
     transition: TransitionOptions;
     delay?: Seconds;
@@ -58,17 +60,17 @@ export interface TimedTween<Name extends string = string> extends RepeatOptions 
 //         readonly tweens: {
 //             readonly [I in keyof T]: RatioTween<T[I]>;
 //         },
-//         options?: AnimationPlaybackOptions
+//         options?: PlaybackOptions
 //     ) {}
 // }
 
 /** @internal */
-export class TimedTweenTiming<T extends string[]> {
+class TimedTweenTiming<T extends string[]> {
     readonly type = "timed-tween" as const;
-    readonly options: AnimationPlaybackOptions;
+    readonly options: PlaybackOptions;
     readonly tweens: { readonly [I in keyof T]: TimedTween<T[I]>; };
 
-    constructor(tweens: { readonly [I in keyof T]: TimedTween<T[I]>; }, options: AnimationPlaybackOptions = {}) {
+    constructor(tweens: { readonly [I in keyof T]: TimedTween<T[I]>; }, options: PlaybackOptions = {}) {
         checkPlaybackOptions(options, "The timing");
         this.options = clampedDelay(clampedRepeats(options));
         const givenTweens: readonly TimedTween[] = tweens;

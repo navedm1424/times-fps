@@ -27,16 +27,12 @@ export function stagger(stepOrOptions: Seconds | (StaggerSpacing & StaggerOption
     checkNumber(startDelay, "The stagger's start delay");
     if (typeof from === 'number') checkNumber(from, "The stagger's origin");
     if (easing !== undefined) checkEasingSpecifier(easing, "The stagger's easing");
-    const easingFunction = easing && resolveEasing(easing);
+    const spacingEasing = resolveEasing(easing ?? 'linear');
     const spreadDelay = (index: number, total: number): Seconds => {
         const origin = originIndex(from, total);
-        const distance = Math.abs(index - origin);
-        if (step !== undefined && !easingFunction) return distance * step;
-
         const farthestDistance = Math.max(origin, total - 1 - origin);
         if (farthestDistance === 0) return 0;
-        const share = easingFunction ? easingFunction.progressAt(distance / farthestDistance) : distance / farthestDistance;
-        return share * (step !== undefined ? farthestDistance * step : spread!);
+        return spacingEasing.progressAt(Math.abs(index - origin) / farthestDistance) * (spread ?? farthestDistance * step!);
     };
     return (index, total) => startDelay + spreadDelay(index, total);
 }

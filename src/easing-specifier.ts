@@ -1,8 +1,13 @@
-import {CubicBezierEasing, type Easing, LinearEasing, StepsEasing} from "./easing.ts";
+import {
+    CubicBezierEasing,
+    type CubicBezierEasingParams,
+    type Easing,
+    LinearEasing,
+    type StepPosition,
+    StepsEasing,
+    type StepsEasingParams
+} from "./easing.ts";
 
-export type CubicBezierEasingParams = readonly [x1: number, y1: number, x2: number, y2: number];
-export type StepPosition = 'jumpStart' | 'jumpEnd' | 'jumpNone' | 'jumpBoth';
-export type StepsEasingParams = readonly [count: number, position?: StepPosition];
 export type EasingSpecifier = EasingPreset | CubicBezierEasingParams | StepsEasingParams;
 
 /** As in CSS `cubic-bezier()`. */

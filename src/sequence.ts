@@ -1,56 +1,60 @@
-import {AnimationTiming, type AnimationTimingOptions, type TimedTweenTiming} from "./animation.ts";
+import {AnimationTiming, type AnimationTimingOptions} from "./animation.ts";
 import {type At, checkPositionDescriptor, parsePositionDescriptor, type PositionDescriptor} from "./at.ts";
-import {checkPlaybackOptions, clampedDelay, clampedRepeats, type SequencePlaybackOptions} from "./playback-options.ts";
+import {checkPlaybackOptions, type PlaybackDescriptor, playbackDescriptorOf, type PlaybackOptions} from "./playback-options.ts";
+import {isProduction} from "./utils/environment.ts";
 
-export interface AnimationTimingEntry<N extends string = string> {
-    timing: AnimationTiming;
-    position: PositionDescriptor<N>;
+export interface AnimationTimingEntry<Name extends string = string, Names extends string = string> {
+    name: Name;
+    animation: AnimationTiming;
+    position: PositionDescriptor<Names>;
 }
-export interface SubsequenceTimingEntry<NS extends SequenceTiming = SequenceTiming, N extends string = string> {
-    sequence: NS;
-    position: PositionDescriptor<N>;
+export interface SubsequenceTimingEntry<Name extends string = string, Subsequence extends SequenceTiming = SequenceTiming, Names extends string = string> {
+    name: Name;
+    sequence: Subsequence;
+    position: PositionDescriptor<Names>;
 }
 
 export type SequenceTimingEntry = AnimationTimingEntry | SubsequenceTimingEntry;
 
-export type SequenceTimingEntries = {
-    readonly [name: string]: SequenceTimingEntry;
-};
+export type SequenceTimingEntries = readonly SequenceTimingEntry[];
+
+type EntryNames<Entries extends SequenceTimingEntries> = Entries[number]['name'];
+
+/** An animation leaf's key in a sequence: the names of the entries leading to it, joined by `>`. */
+export type EntryPath = string;
+
+export function entryPathOf(parentPath: EntryPath | undefined, name: string): EntryPath {
+    return parentPath ? `${parentPath}>${name}` : name;
+}
 
 const SEQUENCE_TIMING_CONSTRUCTION_LICENSE = Symbol("SequenceTimingConstructionLicense");
 
 function createSequenceTimingBuilder(): SequenceTimingBuilder {
-    return new (SequenceTimingBuilder as any)([], {}, SEQUENCE_TIMING_CONSTRUCTION_LICENSE);
+    return new (SequenceTimingBuilder as any)([], SEQUENCE_TIMING_CONSTRUCTION_LICENSE);
 }
-function createSequenceTiming<Entries extends SequenceTimingEntries>(names: readonly string[], entries: Entries, options?: SequencePlaybackOptions): SequenceTiming<Entries> {
-    return new (SequenceTiming as any)(names, entries, options, SEQUENCE_TIMING_CONSTRUCTION_LICENSE);
+function createSequenceTiming<Entries extends SequenceTimingEntries>(entries: Entries, playback: PlaybackDescriptor): SequenceTiming<Entries> {
+    return new (SequenceTiming as any)(entries, playback, SEQUENCE_TIMING_CONSTRUCTION_LICENSE);
 }
 
 /** Builds a sequence timing; every `add` gives a new builder, so branches never share entries. */
-export class SequenceTimingBuilder<SE extends SequenceTimingEntries = {}> {
-    #names: readonly string[];
-    #entries: SequenceTimingEntries;
+export class SequenceTimingBuilder<Entries extends SequenceTimingEntries = []> {
+    #entries: Entries;
 
-    private constructor(
-        names: readonly string[] = [],
-        entries: SequenceTimingEntries = {},
-        license?: typeof SEQUENCE_TIMING_CONSTRUCTION_LICENSE
-    ) {
+    private constructor(entries: Entries, license?: typeof SEQUENCE_TIMING_CONSTRUCTION_LICENSE) {
         if (license !== SEQUENCE_TIMING_CONSTRUCTION_LICENSE)
-            throw new TypeError(`Use ${SequenceTiming.name}.${SequenceTiming.builder.name} to create a ${SequenceTimingBuilder.name}.`);
-        this.#names = names;
+            throw new TypeError(isProduction() ? "Illegal constructor" : `Use ${SequenceTiming.name}.${SequenceTiming.builder.name} to create a ${SequenceTimingBuilder.name}.`);
         this.#entries = entries;
     }
 
-    #addEntry<N extends string>(name: N, entry: SequenceTimingEntry): SequenceTimingBuilder<SE & { [_ in N]: SequenceTimingEntry }> {
-        return new SequenceTimingBuilder([...this.#names, name], {...this.#entries, [name]: entry}, SEQUENCE_TIMING_CONSTRUCTION_LICENSE);
+    #addEntry<Entry extends SequenceTimingEntry>(entry: Entry): SequenceTimingBuilder<[...Entries, Entry]> {
+        return new SequenceTimingBuilder<[...Entries, Entry]>([...this.#entries, entry], SEQUENCE_TIMING_CONSTRUCTION_LICENSE);
     }
 
-    add<N extends string>(
+    add<Name extends string>(
         timing: AnimationTiming | AnimationTimingOptions,
-        name: N,
-        at?: At<keyof SE & string>
-    ): SequenceTimingBuilder<SE & { [_ in N]: AnimationTimingEntry<keyof SE & string> }>;
+        name: Name,
+        at?: At<EntryNames<Entries>>
+    ): SequenceTimingBuilder<[...Entries, AnimationTimingEntry<Name, EntryNames<Entries>>]>;
 
     // add<N extends string, A extends TimedTweenTiming<string[]>>(
     //     timing: A,
@@ -58,46 +62,44 @@ export class SequenceTimingBuilder<SE extends SequenceTimingEntries = {}> {
     //     at?: At<keyof SE & string>
     // ): SequenceTimingBuilder<SE & { [_ in N]: TimedTweenTimingEntry<A, keyof SE & string> }>;
 
-    add<N extends string, NS extends SequenceTiming>(
-        sequence: NS,
-        name: N,
-        at?: At<keyof SE & string>
-    ): SequenceTimingBuilder<SE & { [_ in N]: SubsequenceTimingEntry<NS, keyof SE & string> }>;
+    add<Name extends string, Subsequence extends SequenceTiming>(
+        sequence: Subsequence,
+        name: Name,
+        at?: At<EntryNames<Entries>>
+    ): SequenceTimingBuilder<[...Entries, SubsequenceTimingEntry<Name, Subsequence, EntryNames<Entries>>]>;
 
-    add<N extends string>(
+    add<Name extends string>(
         timing: AnimationTiming | AnimationTimingOptions | SequenceTiming,
-        name: N,
+        name: Name,
         at?: At
-    ): SequenceTimingBuilder<SE & { [_ in N]: SequenceTimingEntry }> {
-        checkNewName(name, this.#names);
+    ): SequenceTimingBuilder<[...Entries, SequenceTimingEntry]> {
+        const earlierNames = this.#entries.map(entry => entry.name);
+        checkNewName(name, earlierNames);
         const position = parsePositionDescriptor(at ?? '>');
-        checkPositionDescriptor(position, this.#names, `Entry "${name}"`);
+        checkPositionDescriptor(position, earlierNames, `Entry "${name}"`);
 
-        const entry: SequenceTimingEntry = timing instanceof SequenceTiming
-            ? {sequence: timing, position}
-            : {timing: timing instanceof AnimationTiming ? timing : AnimationTiming.of(timing), position};
-        return this.#addEntry(name, entry);
+        return this.#addEntry(timing instanceof SequenceTiming
+            ? {name, sequence: timing, position}
+            : {name, animation: timing instanceof AnimationTiming ? timing : AnimationTiming.of(timing), position});
     }
 
-    build(options: SequencePlaybackOptions = {}): SequenceTiming<{ [K in keyof SE]: SE[K] }> {
-        if (this.#names.length === 0)
+    build(options: PlaybackOptions = {}): SequenceTiming<Entries> {
+        if (this.#entries.length === 0)
             throw new Error("A sequence needs at least one entry.");
         checkPlaybackOptions(options, "The sequence");
-        options = clampedDelay(clampedRepeats(options));
-        return createSequenceTiming(this.#names, this.#entries as { [K in keyof SE]: SE[K] }, options);
+        return createSequenceTiming(this.#entries, playbackDescriptorOf(options));
     }
 }
 
 /** Named timings laid out in time, without targets or values. */
-export class SequenceTiming<SE extends SequenceTimingEntries = SequenceTimingEntries> {
+export class SequenceTiming<Entries extends SequenceTimingEntries = SequenceTimingEntries> {
     private constructor(
-        readonly names: readonly string[],
-        readonly entries: SE,
-        readonly options: SequencePlaybackOptions = {},
+        readonly entries: Entries,
+        readonly playback: PlaybackDescriptor,
         license?: typeof SEQUENCE_TIMING_CONSTRUCTION_LICENSE
     ) {
         if (license !== SEQUENCE_TIMING_CONSTRUCTION_LICENSE)
-            throw new TypeError(`A ${SequenceTiming.name} can only be created using ${SequenceTimingBuilder.name}.`);
+            throw new TypeError(isProduction() ? "Illegal constructor" : `A ${SequenceTiming.name} can only be created using ${SequenceTimingBuilder.name}.`);
     }
 
     static builder() {

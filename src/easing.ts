@@ -1,9 +1,12 @@
 import {CubicBezier} from "./cubic-bezier.ts";
 import type {DampedSpring} from "./damped-spring.ts";
-import type {CubicBezierEasingParams, StepPosition, StepsEasingParams} from "./easing-specifier.ts";
 import type {Progress, Seconds} from "./types.ts";
 import {invLerp, lerp, solveMonotone} from "./utils/math.ts";
 import {checkNumber} from "./utils/validation.ts";
+
+export type CubicBezierEasingParams = readonly [x1: number, y1: number, x2: number, y2: number];
+export type StepPosition = 'jumpStart' | 'jumpEnd' | 'jumpNone' | 'jumpBoth';
+export type StepsEasingParams = readonly [count: number, position?: StepPosition];
 
 /** How far outside the window an offset found by solving may land and still count as inside it. */
 const offsetTolerance = 1e-9;
@@ -64,7 +67,7 @@ export abstract class Easing {
     }
 
     protected offsetsOf(inputs: readonly number[]): number[] {
-        return inputs.map(input => invLerp(input, this.windowStart, this.windowEnd)).sort((first, second) => first - second);
+        return inputs.map(input => invLerp(this.windowStart, this.windowEnd, input)).sort((first, second) => first - second);
     }
 }
 
@@ -221,7 +224,7 @@ export class SpringEasing extends Easing {
     }
 
     progressAtTime(time: Seconds): Progress {
-        return this.spring.positionAt(time) + this.closingGap * Math.max(0, invLerp(time, this.closingStart, this.duration));
+        return this.spring.positionAt(time) + this.closingGap * Math.max(0, invLerp(this.closingStart, this.duration, time));
     }
 
     /** The progress per second. */

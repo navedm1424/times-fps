@@ -21,13 +21,13 @@ export type At<Name extends string = string> =
 
 /** The span whose start or end is the reference point, and whose duration is the reference duration; everything so far spans from 0 to the latest end. */
 export type PositionReference<Name extends string> =
-    | { kind: 'previous-entry' }
+    | { kind: 'previousEntry' }
     | { kind: 'entry'; name: Name }
-    | { kind: 'everything-so-far' };
+    | { kind: 'everythingSoFar' };
 
 export type PositionAnchor = 'start' | 'end';
 
-/** The offsets of a position, one of each kind. */
+/** A position's offset from its reference point, as the sum of one amount of each kind. */
 export interface PositionOffset {
     seconds: Seconds;
     /** A fraction of the reference duration. */
@@ -63,20 +63,20 @@ const offsetPattern = /([+-])(=?)((?:[eE][+-]|[^+\-%])*)(%?)/y;
 
 export function parsePositionDescriptor<Name extends string>(at: At<Name>): PositionDescriptor<Name> {
     if (typeof at === 'number')
-        return {reference: {kind: 'everything-so-far'}, anchor: 'start', offset: {seconds: at, referenceFraction: 0, selfFraction: 0}};
+        return {reference: {kind: 'everythingSoFar'}, anchor: 'start', offset: {seconds: at, referenceFraction: 0, selfFraction: 0}};
     const fail = (reason: string) => new SyntaxError(`Can't parse the position "${at}": ${reason}`);
 
     const [, name = '', mark, offsetsText = ''] = /^(\w*)(<<|>>|<|>)?(.*)$/s.exec(at) ?? [];
     if (name && (mark === '<<' || mark === '>>')) throw fail(`\`${mark}\` takes no name before it.`);
-    const reference: PositionReference<Name> = mark === '<<' || mark === '>>' ? {kind: 'everything-so-far'}
+    const reference: PositionReference<Name> = mark === '<<' || mark === '>>' ? {kind: 'everythingSoFar'}
         : name ? {kind: 'entry', name: name as Name}
-        : {kind: 'previous-entry'};
+        : {kind: 'previousEntry'};
     const anchor: PositionAnchor = mark === '<' || mark === '<<' ? 'start' : 'end';
 
     const offset: PositionOffset = {seconds: 0, referenceFraction: 0, selfFraction: 0};
     let previousKindIndex = -1;
-    for (let index = 0; index < offsetsText.length; index = offsetPattern.lastIndex) {
-        offsetPattern.lastIndex = index;
+    offsetPattern.lastIndex = 0;
+    while (offsetPattern.lastIndex < offsetsText.length) {
         const [, sign, equals, amountText = '', percent] = offsetPattern.exec(offsetsText) ?? [];
         if (!sign) throw fail("offsets need a sign, such as `+0.2`.");
         if (!amountText) throw fail(`\`${sign}\` needs an amount after it.`);
@@ -124,9 +124,9 @@ export function resolvePosition<Name extends string>(
 function referenceSpanOf<Name extends string>(reference: PositionReference<Name>, entrySpans: ReadonlyMap<Name, EntrySpan>): EntrySpan {
     const spans = [...entrySpans.values()];
     switch (reference.kind) {
-        case 'previous-entry':
+        case 'previousEntry':
             return spans.at(-1) ?? {start: 0, duration: 0};
-        case 'everything-so-far':
+        case 'everythingSoFar':
             return {start: 0, duration: Math.max(0, ...spans.map(({start, duration}) => start + duration))};
         case 'entry': {
             const span = entrySpans.get(reference.name);

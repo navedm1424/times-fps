@@ -13,7 +13,7 @@ The library lives in `src/`. Resolution tools that any adapter may use or not ar
 TimesFPS is a library for designing animations, meaning their timing, motion and choreography, in a form that's easy to write and portable across conventions and engines.
 
 - **Timing is its own model.** A timing says how a change from 0 to 1 unfolds in time. It never names targets, properties or values, so one timing can be bound to any elements and values, and later run on any engine.
-- **Definitions bind timing to targets and values.** A definition has no playback state. Playing it creates the running animations and returns their controls.
+- **Definitions bind timing to targets and values.** A definition has no playback state. An animator plays it: that creates the running animations and returns their controls.
 
 ### 1.2 Why it exists
 
@@ -85,18 +85,18 @@ type SpringTransitionOptions =
 - **Extension rule:** a new kind needs a required key no other kind has. Eased stays the fallback, so `bounce` must stay required.
 - There are no `eased()` or `spring()` factories: the fields are clearer written out.
 
-**Validation** (`checkTransitionOptions`, on every way a timing is made):
+**Validation** (`checkTransitionOptions`, on every way a timing is made). A missing required key throws a `TypeError` through `requireNumber` or `requireProperty` (`src/utils/validation.ts`), and a number out of range a `RangeError`:
 
 | Field | Rule |
 |---|---|
 | Eased `duration` | A finite number, at least 0. 0 jumps straight to the end values. |
 | Spring `duration`, `visualDuration`, `stiffness`, `damping`, `mass` | A finite number above 0. |
-| `bounce` | Strictly between -1 and 1. |
+| `bounce` | Required on both springs that take it: a missing one throws a `TypeError`. Strictly between -1 and 1. |
 | `velocity` | A finite number. |
 | `restDelta` | Strictly between 0 and 1. |
 | `easing` | As in §2.3, through `checkEasingSpecifier`. |
 
-**Resolution** (`resolveTransition`) gives the play's `duration` and its `Easing`: which easing goes with each kind. The layout calls it as a definition plays (§5.3), not the timing. Each transition is resolved once and the result kept, so every play of a timing shares one easing, and the spring fits cached on it. The spring math behind a spring's easing belongs to the springs themselves (§4):
+**Resolution** (`resolveTransition`) gives a `TransitionDescriptor`, `{duration, easing}`: the play's duration and its `Easing`, which depends on the kind. A spring's comes from `transitionDescriptorOf(spring, restDelta)`, which runs it until it rests. The layout calls it as a definition plays (§5.3), not the timing. Each transition is resolved once and the result kept, so every play of a timing shares one easing, and the spring fits cached on it. The spring math behind a spring's easing belongs to the springs themselves (§4):
 - **Eased:** the duration as given, and `resolveEasing(easing)`, or `linear` without one.
 - **Springs:** the duration below, and a `SpringEasing` over it:
 
@@ -111,7 +111,7 @@ type SpringTransitionOptions =
 
 ### 2.3 Easings
 
-**Specifiers** (`src/easing-specifier.ts`):
+**Specifiers** (`src/easing-specifier.ts`). The params types, `CubicBezierEasingParams`, `StepsEasingParams` and `StepPosition`, are the easing classes' own and live in `src/easing.ts`; the specifier module uses them:
 
 | Form | Type | Meaning |
 |---|---|---|
@@ -130,7 +130,7 @@ type SpringTransitionOptions =
 - **`checkEasingSpecifier`** throws unless the specifier is a preset (a `TypeError` otherwise), or params of the right length for one of the classes, whose own static `check` it then calls: `CubicBezierEasing.check` (finite control points, `x1` and `x2` within 0–1) and `StepsEasing.check` (a known position, and the count above). The class constructors call the same `check`. Transitions and staggers check their easing as they're made.
 - **`resolveEasing`** gives the `Easing`. Presets are shared instances, and `linear` is exported for the code that needs the linear easing itself.
 
-**Easings** (`src/easing.ts`). An `Easing` is pure math over its input time, from 0 to 1, limited to a **window** from `windowStart` to `windowEnd`. It's exported as a type.
+**Easings** (`src/easing.ts`). An `Easing` is pure math over its input time, from 0 to 1, limited to a **window** from `windowStart` to `windowEnd`. It isn't exported: nothing public takes or gives one.
 
 | Member | Meaning |
 |---|---|
@@ -167,12 +167,19 @@ interface RepeatOptions {
     repeatMode?: RepeatMode;
 }
 
-interface AnimationPlaybackOptions extends RepeatOptions {
+interface PlaybackOptions extends RepeatOptions {
     delay?: Seconds | Stagger;  // before the first play; not repeated
 }
 
-type SequencePlaybackOptions = AnimationPlaybackOptions;
+type StaggeredDelays = (count: number) => Seconds[];
+
+interface PlaybackDescriptor extends RepeatOptions {
+    delay?: Seconds | StaggeredDelays;
+}
 ```
+
+- **One type for animations and sequences.** Both take `PlaybackOptions`.
+- **What a timing keeps** is a `PlaybackDescriptor`, in its `playback` field: the options clamped, with a stagger wrapped by `staggeredDelaysOf` (§2.5).
 
 | Option | Default | Rule |
 |---|---|---|
@@ -190,6 +197,7 @@ type SequencePlaybackOptions = AnimationPlaybackOptions;
 - **For a sequence,** `reverse` reverses the whole iteration in time, and `mirror` does the same but keeps each animation's easing running forwards through flipped values.
 - **`Infinity`** is valid on animations and sequences, including an infinite entry inside an infinitely repeating sequence.
 - **Checks and clamping** are `checkPlaybackOptions`, `clampedDelay` and `clampedRepeats` (`src/playback-options.ts`). `NaN` and infinite times throw through `checkNumber` (`src/utils/validation.ts`).
+- **Collecting the options.** `AnimationTiming`'s constructor and `SequenceTimingBuilder.build` each check the options with `checkPlaybackOptions`, then keep `playbackDescriptorOf(options)`, which clamps them and wraps a stagger `delay` with `staggeredDelaysOf`.
 
 ### 2.5 Staggers
 
@@ -209,13 +217,21 @@ function stagger(step: Seconds, options?: StaggerOptions): Stagger;
 function stagger(options: StaggerSpacing & StaggerOptions): Stagger;
 ```
 
-A stagger is a `delay` given as a function of each element's index (`src/stagger.ts`). It's a timing decision, so it belongs in the timing. Only playing says how many elements there are, so delays are resolved at adaptation.
+A stagger is a `delay` given as a function of each element's index. `Stagger` is a playback option (`src/playback-options.ts`), and `stagger` is the utility that makes one (`src/stagger.ts`). It's a timing decision, so it belongs in the timing. Only playing says how many elements there are, so delays are resolved at adaptation.
+
+**`staggeredDelaysOf(stagger)`** (`src/playback-options.ts`) wraps a stagger into `StaggeredDelays`: a function that takes the element count and gives every element's delay, in order. Each delay that's `NaN` or infinite throws (`The staggered delay of element <index> …`), and a negative one becomes 0. Timings keep their stagger wrapped this way, in their `PlaybackDescriptor` (§2.4), and the layout calls it with the element count, or a staggered sequence's lane count (§2.7.3).
 
 | Term | Value |
 |---|---|
 | origin | `first`: 0. `last`: total − 1. `center`: (total − 1) / 2. A number: itself. |
 | distance | \|index − origin\| |
 | farthest | max(origin, total − 1 − origin) |
+
+**One formula.** The delay, before `startDelay` is added, is
+
+> easing(distance / farthest) × span
+
+where `easing` is `linear` unless one is given, and the span is `spread`, or farthest × `step`. So:
 
 | Options | Delay, before `startDelay` is added |
 |---|---|
@@ -227,59 +243,68 @@ A stagger is a `delay` given as a function of each element's index (`src/stagger
 - **A number** as the first argument is the `step`, so `stagger(0.05, {from: 'center'})` is `stagger({step: 0.05, from: 'center'})`. `spread` only goes by name.
 - **`startDelay`** is the origin's delay, added to every element's.
 - With `spread`, the farthest element waits exactly `startDelay + spread`. With `from: 'center'`, both edges do.
-- With `easing` or `spread`, a farthest distance of 0 gives `startDelay`.
+- A farthest distance of 0 gives `startDelay`.
 - **Validation:** exactly one of `step` and `spread`, and `step`, `spread`, `startDelay` and a number `from` must be finite. The easing goes through `checkEasingSpecifier`.
 - **The names** say what each one is: `step` is the time between neighbours, `spread` the time the delays spread over. GSAP calls them `each` and `amount`, and Motion calls `startDelay` the same.
-- **Resolved delays:** negative ones become 0, and NaN or infinite ones throw.
+- **Resolved delays:** negative ones become 0, and NaN or infinite ones throw, through `staggeredDelaysOf`.
 - **Any `Stagger` function** works where a stagger does.
 
 ### 2.6 Animation timing
 
 ```ts
 class AnimationTiming {
-    private constructor(transition: TransitionOptions, options?: AnimationPlaybackOptions);
+    private constructor(transition: TransitionOptions, options?: PlaybackOptions);
     static of(timing: AnimationTimingOptions): AnimationTiming;
-    static of(transition: TransitionOptions, options?: AnimationPlaybackOptions): AnimationTiming;
+    static of(transition: TransitionOptions, options?: PlaybackOptions): AnimationTiming;
 
     readonly transition: TransitionOptions;
-    readonly options: AnimationPlaybackOptions;  // clamped
+    readonly playback: PlaybackDescriptor;  // clamped, with a stagger wrapped
 }
 
-type AnimationTimingOptions = TransitionOptions & AnimationPlaybackOptions;
+type AnimationTimingOptions = TransitionOptions & PlaybackOptions;
 ```
 
 - **One play through the transition,** with its delay and repeats (`src/animation.ts`).
-- **`of` is the only way to make one.** The constructor is private, and validates the transition and options, and clamps the options.
+- **`of` is the only way to make one.** The constructor is private, and validates the transition and options, and keeps the options as a `PlaybackDescriptor` (§2.4).
 - **A timing validates and stores.** It keeps the transition as given and never resolves it: its duration and easing come from `resolveTransition` (§2.2).
 - **`AnimationTimingOptions`** is a transition with the playback options spread into it. `of` splits its first argument by key into the transition options and the playback options (`delay`, `repeat`, `repeatDelay`, `repeatMode`), and the `options` given override the ones split out. The two key sets never overlap, so a transition on its own splits into itself, and both overloads share one implementation.
 - **Wherever a timing is taken,** an `AnimationTiming` is used as it is, and `AnimationTimingOptions` go through `of` there.
 - **Timings have no name.** They get one when they're placed in a sequence, so the same timing can be placed many times.
 - **There's no superclass.** Each timing class validates its own options.
-- **`TimedTweenTiming`** is pending and internal (`@internal`, stripped from the build): tweens that run one after another, each with its own transition, delay and finite repeats. Sequences can't hold it yet, and nothing plays it.
+- **`TimedTweenTiming`** is pending and internal (not exported from `src/animation.ts`): tweens that run one after another, each with its own transition, delay and finite repeats. Sequences can't hold it yet, and nothing plays it.
 
 ### 2.7 Sequence timing
 
 ```ts
-class SequenceTiming {
+class SequenceTiming<Entries extends SequenceTimingEntries = SequenceTimingEntries> {
     static builder(): SequenceTimingBuilder;
+
+    readonly entries: Entries;
+    readonly playback: PlaybackDescriptor;  // clamped, with a stagger wrapped
 }
 
-class SequenceTimingBuilder<SE extends SequenceTimingEntries = {}> {
-    add<N extends string>(timing: AnimationTiming | AnimationTimingOptions, name: N, at?: At<keyof SE & string>)
-        : SequenceTimingBuilder<SE & { [_ in N]: AnimationTimingEntry }>;
-    add<N extends string, NS extends SequenceTiming>(sequence: NS, name: N, at?: At<keyof SE & string>)
-        : SequenceTimingBuilder<SE & { [_ in N]: SubsequenceTimingEntry<NS> }>;
-    build(options?: SequencePlaybackOptions): SequenceTiming<SE>;
+class SequenceTimingBuilder<Entries extends SequenceTimingEntries = []> {
+    add<Name extends string>(timing: AnimationTiming | AnimationTimingOptions, name: Name, at?: At<EntryNames<Entries>>)
+        : SequenceTimingBuilder<[...Entries, AnimationTimingEntry<Name, EntryNames<Entries>>]>;
+    add<Name extends string, Subsequence extends SequenceTiming>(sequence: Subsequence, name: Name, at?: At<EntryNames<Entries>>)
+        : SequenceTimingBuilder<[...Entries, SubsequenceTimingEntry<Name, Subsequence, EntryNames<Entries>>]>;
+    build(options?: PlaybackOptions): SequenceTiming<Entries>;
 }
+
+interface AnimationTimingEntry<Name, Names> { name: Name; animation: AnimationTiming; position: PositionDescriptor<Names> }
+interface SubsequenceTimingEntry<Name, Subsequence, Names> { name: Name; sequence: Subsequence; position: PositionDescriptor<Names> }
+type SequenceTimingEntries = readonly (AnimationTimingEntry | SubsequenceTimingEntry)[];
+type EntryNames<Entries> = Entries[number]['name'];
 ```
 
 A sequence timing lays named timings out in time, without targets or values (`src/sequence.ts`).
 
-- **Names** are required, because a mapping refers to entries by name (§3.6). They're unique within their sequence, and can only contain letters, digits and underscores. So they can't contain `>`, and entry paths can't collide.
-- **The builder is the only validator.** `add` checks the name (`checkNewName`), parses the position and checks it against the names so far (`checkPositionDescriptor`, `src/at.ts`), and makes `AnimationTimingOptions` into an `AnimationTiming`, so all of these throw at the `add` that wrote them. `build` checks and clamps the options as an animation timing's, and throws for a sequence without entries.
-- **Private constructors.** `SequenceTiming` and `SequenceTimingBuilder` have private constructors that throw unless they're passed a license symbol private to `src/sequence.ts`. `SequenceTiming.builder()` is the only way in, so a `SequenceTiming` is always one a builder checked, and its constructor checks nothing.
+- **Names** are required, because a mapping refers to entries by name (§3.5). They're unique within their sequence, and can only contain letters, digits and underscores. So they can't contain `>`, and entry paths can't collide.
+- **The builder is the only validator.** `add` checks the name (`checkNewName`), parses the position and checks it against the names so far (`checkPositionDescriptor`, `src/at.ts`), and makes `AnimationTimingOptions` into an `AnimationTiming`, so all of these throw at the `add` that wrote them. `build` checks the options and keeps them as a `PlaybackDescriptor`, as an animation timing does (§2.4), and throws for a sequence without entries.
+- **Private constructors.** `SequenceTiming` and `SequenceTimingBuilder` have private constructors that throw a `TypeError` unless they're passed a license symbol private to `src/sequence.ts`. The message names the classes, and says to use `SequenceTiming.builder` or the builder. In a production build (`isProduction()`, §4) it's `Illegal constructor` instead, because minifying renames the classes. `SequenceTiming.builder()` is the only way in, so a `SequenceTiming` is always one a builder checked, and its constructor checks nothing: the builder has the license, and does all of the collecting and checking for it.
 - **Builders are immutable.** `add` returns a new builder with its own copy of the entries, so branches never share entries.
-- **Entries** are kept in order as `names`, with `entries` keyed by name. Each is `{timing, position}` (`AnimationTimingEntry`) or `{sequence, position}` (`SubsequenceTimingEntry`), where `position` is the parsed `PositionDescriptor`. The builder's and the timing's type parameter is the entries' type, so a mapping's type can mirror the tree (§3.6), and `At` takes its names.
+- **Entries** are one ordered array, `entries`. Each is `{name, animation, position}` (`AnimationTimingEntry`) or `{name, sequence, position}` (`SubsequenceTimingEntry`), where `position` is the parsed `PositionDescriptor`. The builder's and the timing's type parameter is the entries' tuple type, each entry with its name as a literal type, so a mapping's type can mirror the tree (§3.5), and `At` takes the names so far.
+- **Entry paths** (`EntryPath`, `entryPathOf`, here) are the names leading to an entry, joined by `>`. The definitions, the layout and the adapter all name entries by them.
 - **Nesting.** A subsequence is one unit on the outer timeline. Its entries' positions only place them within it.
 
 #### 2.7.1 Positions
@@ -319,19 +344,25 @@ sign            = '+' | '-'
 
 ```ts
 type PositionReference<Name> =
-    | {kind: 'previous-entry'}
+    | {kind: 'previousEntry'}
     | {kind: 'entry'; name: Name}
-    | {kind: 'everything-so-far'};          // from 0 to the latest end so far
+    | {kind: 'everythingSoFar'};            // from 0 to the latest end so far
 
 interface PositionDescriptor<Name> {
     reference: PositionReference<Name>;     // gives the reference point and the reference duration
     anchor: 'start' | 'end';                // which end of the reference is the point
-    offset: {seconds: Seconds; referenceFraction: number; selfFraction: number};
+    offset: PositionOffset;                 // one total offset, as one amount of each kind
+}
+
+interface PositionOffset {
+    seconds: Seconds;
+    referenceFraction: number;
+    selfFraction: number;
 }
 ```
 
 - Each offset fills its kind's field, and a missing one is 0. `25%` is a fraction of 0.25.
-- `'<<'` is `everything-so-far` at its `start`, and `'>>'` at its `end`.
+- `'<<'` is `everythingSoFar` at its `start`, and `'>>'` at its `end`.
 
 **Resolving.** `resolvePosition(descriptor, entrySpans, selfDuration)`:
 - `entrySpans` maps the earlier entries' names to `EntrySpan`s, `{start, duration}`, in order, so its last entry is the previous one. With none, the previous entry is `{start: 0, duration: 0}`.
@@ -389,30 +420,23 @@ A sequence whose `delay` is a stagger plays once per element index. The copy at 
 | A sequence | `SequenceTiming` | `SequenceDefinition` | `AnimationControls` |
 
 - **A definition** is a timing bound to targets and values. It's everything needed to play, with no playback state. `Definition` is `AnimationDefinition | SequenceDefinition`.
-- **`play()`** turns a definition into running animations and returns their controls. A definition can be played any number of times, in any scope.
-- **Definitions are DOM-bound:** targets are elements, and values are CSS. There's no engine parameter yet. Everything plays with WAAPI.
+- **An animator's `animate()`** turns a definition into running animations and returns their controls. A definition can be played any number of times, by any animator, in any scope.
+- **Definitions are DOM-bound:** targets are elements, and values are CSS. The animator decides the engine: `animator()` gives a `WAAPIAnimator`, and there's no other yet.
 - **Definitions are immutable,** and so are their builders.
 - `AnimationDefinition`, `SequenceDefinition` and the builders are exported as types only. The functions make them.
 
 ### 3.2 `animation()`
 
 ```ts
-function animation<Values extends AnimationValues>(
-    target: Target,
-    values: Values,
-    timing: AnimationTiming | AnimationTimingOptions | PropertyTimings<Values>
-): AnimationDefinition;
+function animation(target: Target, values: AnimationValues, timing: AnimationTiming | AnimationTimingOptions): AnimationDefinition;
 ```
 
 | When | What happens |
 |---|---|
-| `animation()` | The timing is made and validated, and the values' forms are checked (§3.4). Both throw here. |
-| `play()` | The target is resolved in the scope, the values are read against each element, and the animations are created (§3.8). |
+| `animation()` | The timing is made and validated, and the values' forms are checked (`checkAnimationValues`, §3.4). Both throw here. |
+| An animator's `animate()` | The target is resolved in the animator's scope, the values are read against each element, and the animations are created (§3.7). |
 
-**Telling the timing forms apart,** in order:
-1. An `AnimationTiming` instance.
-2. `AnimationTimingOptions`: it has a transition key (`duration`, `visualDuration`, `stiffness` or `damping`) whose value is a number.
-3. Otherwise, a `PropertyTimings` record. Its values are timings, which are objects, so a property that happens to share a transition key's name isn't mistaken for one.
+**The timing** is an `AnimationTiming`, used as it is, or `AnimationTimingOptions`, which go through `AnimationTiming.of`. Every property in `values` runs on it. There's no timing per property.
 
 ### 3.3 Targets
 
@@ -421,7 +445,7 @@ type CSSSelector = string;
 type Target = Element | Iterable<Element> | CSSSelector | ((scope: Element) => Element | Iterable<Element>);
 ```
 
-- **Resolution** (`resolveTargets`, at `play`): a selector is `scope.querySelectorAll`, and a function is called with the scope. A target, or what its function returns, is one element or any iterable of them, such as an array or a `NodeList`. A string is never taken as an iterable: it's always a selector.
+- **Resolution** (`resolveTargets`, at `animate`): a selector is `scope.querySelectorAll`, and a function is called with the scope. A target, or what its function returns, is one element or any iterable of them, such as an array or a `NodeList`. A string is never taken as an iterable: it's always a selector.
 - **Elements are deduplicated** in order. An element's index in that order is what staggers use: document order for a selector.
 - **No elements throws:** `"<selector>" matches no elements.`, or `The target has no elements.`
 
@@ -444,27 +468,15 @@ type AnimationValues = { [property: string]: ValueStops };
 | `null` at 0 or 1 | that stop is missing |
 
 - `progressStopsOf` (`src/dom/mapping.ts`) turns the forms into stops. Keys outside 0–1 throw. `null` anywhere but the ends throws, and so does a list or object without values.
-- **A missing 0** is the value underneath as the entry starts: the value its track shows then (§5.6), or the property's current value when `play` is called.
+- **When the forms are checked:** as the definition is made. `checkAnimationValues` runs `progressStopsOf` on every property, in `animation()`, in an inline sequence entry, and for every animation entry of a mapping given to `sequence()`. Playing reads the stops again, and never meets an invalid form.
+- **A missing 0** is the value underneath as the entry starts: the value its track shows then (§5.6), or the property's current value when `animate` is called.
 - **A missing 1** is the value underneath as the entry ends. §5.6 only resolves missing starts so far, so a missing 1 takes the last given value for now (`PropertyStops.of`).
 - **Between stops,** the value is linear in the progress. Past the ends, as a spring overshoots, it continues the nearest segment.
 - **Properties** are camelCase. Custom properties are written as they are (`--like-this`). `float` and `offset` become `cssFloat` and `cssOffset` in keyframes (§5.8).
 - **Value types and units** come from `CSS.supports`, per property (§5.2).
 - **Passing through or resolving to numbers:** values pass through to WAAPI as their CSS text wherever every keyframe lands on a stop, and are resolved to numbers in one unit otherwise (§5.6). Where they need numbers, a property must take a single number: `transform` and two-value `translate` aren't supported there.
 
-### 3.5 Timing per property
-
-```ts
-type PropertyTimings<Values extends AnimationValues> = {
-    [Property in keyof Values]: AnimationTiming | AnimationTimingOptions;
-};
-```
-
-- **Every property** in `values` needs a timing, and no other key is allowed. The type requires it, and the runtime throws for a missing or extra key.
-- **Under the hood** (`propertySplitOf`, `src/definitions.ts`), it's a subsequence with one entry per property, named `a`, `b`, … in the values' order, all starting together (`'<'`), on the same target. Its mapping node has `splitsProperties: true`.
-- **Animation `id`s** leave out the level this split adds, so they read as the definition's own path and the property.
-- It works for inline sequence entries too.
-
-### 3.6 `sequence()`
+### 3.5 `sequence()`
 
 ```ts
 function sequence(): SequenceDefinitionBuilder;
@@ -480,10 +492,10 @@ interface EntryPlacementOptions<N extends string, Names extends string> {
 }
 
 class SequenceDefinitionBuilder<Names extends string = never> {
-    add<Values extends AnimationValues, N extends string = never>(
+    add<N extends string = never>(
         target: Target,
-        values: Values,
-        timing: AnimationTiming | AnimationTimingOptions | PropertyTimings<Values>,
+        values: AnimationValues,
+        timing: AnimationTiming | AnimationTimingOptions,
         placement?: EntryPlacementOptions<N, Names>
     ): SequenceDefinitionBuilder<Names | N>;
 
@@ -492,7 +504,7 @@ class SequenceDefinitionBuilder<Names extends string = never> {
         placement?: EntryPlacementOptions<N, Names>
     ): SequenceDefinitionBuilder<Names | N>;
 
-    build(options?: SequencePlaybackOptions): SequenceDefinition;
+    build(options?: PlaybackOptions): SequenceDefinition;
 }
 ```
 
@@ -503,30 +515,29 @@ class SequenceDefinitionBuilder<Names extends string = never> {
 - **Immutable:** each `add` returns a new builder with its own copy of the entries.
 - **`build`**:
     1. names the unnamed entries in order, as `a` to `z`, then `aa`, `ab` and on, skipping the names given;
-    2. compiles the entries into a `SequenceTiming` and a mapping tree (§3.8), with each nested definition contributing its own timing and mapping;
+    2. compiles the entries into a `SequenceTiming` and a `SequenceMapping` (§3.7), with each nested definition contributing its own timing and mapping;
     3. validates and clamps the options;
     4. throws for a sequence without entries.
 
 **From a sequence timing.**
 
 ```ts
-interface AnimationMapping {
-    target: Target;
-    values: AnimationValues;
-}
+type AnimationMapping = [target: Target, values: AnimationValues];
 
-type SequenceMapping<Timing extends SequenceTiming> = {
-    [Name in entry names of Timing]: entry is a SequenceTiming
-        ? SequenceMapping<that SequenceTiming>
+type SequenceMapping<Timing extends SequenceTiming = SequenceTiming> = {
+    [Name in entry names of Timing]: entry is a SubsequenceTimingEntry
+        ? SequenceMapping<its SequenceTiming>
         : AnimationMapping;
 };
 ```
 
 - The mapping mirrors the timing's tree, keyed by entry name, with a nested mapping for each subsequence timing.
-- Every entry must be mapped. The type requires it, and `sequence()` throws `No mapping present for "<path>".` An animation entry's mapping without a target or values throws too, and its values are checked as `animation()`'s.
+- An animation entry's mapping is a `[target, values]` pair. A sequence's is a plain record of its entries' mappings, so the two are told apart by `Array.isArray`.
+- Every entry must be mapped. The type requires it, and `sequence()` throws `No mapping present for "<path>".` An animation entry's mapping that isn't a `[target, values]` pair throws `The mapping of "<path>" needs a target and values.`, and its values are checked as `animation()`'s (§3.4).
+- `SequenceMapping` with no argument is the mapping of any sequence timing.
 - It returns a `SequenceDefinition`, the same as `build()`, so it can be played or added to another sequence.
 
-### 3.7 Overlaps
+### 3.6 Overlaps
 
 When entries animate the same property of the same element (§5.5):
 
@@ -535,23 +546,31 @@ When entries animate the same property of the same element (§5.5):
 - Only the entry that starts first holds its start values before it starts.
 - An entry holds its end values after it ends, unless one declared before it is still running.
 
-### 3.8 Playing
+### 3.7 Playing
 
 ```ts
-interface PlayOptions {
+interface AnimatorOptions {
     scope?: Element;          // document.documentElement by default
 }
 
-definition.play(options?: PlayOptions): AnimationControls;
+function animator(options?: AnimatorOptions): Animator;
+
+interface Animator {
+    animate(target: Target, values: AnimationValues, timing: AnimationTiming | AnimationTimingOptions): AnimationControls;
+    animate<Timing extends SequenceTiming>(timing: Timing, mapping: SequenceMapping<Timing>): AnimationControls;
+    animate(definition: Definition): AnimationControls;
+}
 ```
 
-- **Each `play`** calls `WAAPIAnimator.play(timing, mapping, options)`, which resolves the targets in the scope, the values per element, the layout with the element counts, and the tracks, then calls `element.animate()` for each effect (§5).
-- **What a definition holds** (`mappedTiming`, `@internal`): its timing, an `AnimationTiming` or a `SequenceTiming`, and a **mapping tree** of the same shape, `MappingTree` (`src/dom/mapping.ts`). Its leaves are `AnimationMapping`s, and each sequence is a `SequenceMappingNode`, `{entries, splitsProperties}`.
-- **Definitions expose nothing but `play`.** Their inputs aren't kept on them: `mappedTiming` holds everything, and it and their constructors are `@internal`.
-- **It always starts playing.** There's no `autoplay`: pausing right after `play` shows no motion, because no frame renders in between.
-- **Animation `id`s** are the entry path and the property, `path:property`, or the property alone for an animation on its own. The path is the entry names leading to the leaf, joined by `>`, leaving out the names of entries inside a node that `splitsProperties`.
+- **An animator animates in one scope** (`src/animator.ts`). `animator` gives a `WAAPIAnimator` (`src/waapi/animator.ts`), which implements `Animator`. Other engines would implement it too. The scope defaults to `document.documentElement` at each `animate`, not when the animator is made, so an animator can be made where there's no document.
+- **`animate`'s three forms.** The first two take what `animation()` and `sequence(timing, mapping)` take, and make the definition with them, so their checks throw at `animate`. A definition is played as it is. `WAAPIAnimator` tells them apart by the first argument: an `AnimationDefinition` or `SequenceDefinition`, a `SequenceTiming`, or else a target, which can never be any of these.
+- **Each `animate`** resolves the targets in the scope, the values per element, the layout with the element counts, and the tracks, then calls `element.animate()` for each effect (§5).
+- **What a definition holds:** an `AnimationDefinition` its `timing` (an `AnimationTiming`), `target` and `values`; a `SequenceDefinition` its `timing` (a `SequenceTiming`) and its `mapping` (a `SequenceMapping`). A `SequenceDefinitionBuilder` puts each animation entry's target and values into the mapping as `[target, values]`. A **mapping tree**, `MappingTree` (`src/dom/mapping.ts`), is either kind of mapping: an `AnimationMapping` or a `SequenceMapping`.
+- **Definitions expose nothing.** Their fields and constructors are `@internal`, and they have no methods: animators read their fields.
+- **It always starts playing.** There's no `autoplay`: pausing right after `animate` shows no motion, because no frame renders in between.
+- **Animation `id`s** are the entry path and the property, `path:property`, or the property alone for an animation on its own. The path is the entry names leading to the leaf, joined by `>` (§2.7).
 
-### 3.9 Controls
+### 3.8 Controls
 
 `AnimationControls` (`src/waapi/controls.ts`) wraps the native `Animation`s of one play.
 
@@ -576,28 +595,29 @@ definition.play(options?: PlayOptions): AnimationControls;
 
   Interruptions are built on it.
 
-### 3.10 Exports
+### 3.9 Exports
 
 | Kind | Exports |
 |---|---|
-| Functions | `animation`, `sequence`, `stagger`, `cubicBezier`, `steps` |
+| Functions | `animator`, `animation`, `sequence`, `stagger`, `cubicBezier`, `steps` |
 | Classes | `AnimationTiming`, `SequenceTiming` |
-| Definitions and controls (types) | `AnimationDefinition`, `SequenceDefinition`, `Definition`, `SequenceDefinitionBuilder`, `SequenceTimingBuilder`, `AnimationControls`, `PlayOptions` |
-| Targets and values | `Target`, `CSSSelector`, `CSSValue`, `ValueStops`, `AnimationValues`, `PropertyTimings` |
+| Definitions and controls (types) | `AnimationDefinition`, `SequenceDefinition`, `Definition`, `SequenceDefinitionBuilder`, `SequenceTimingBuilder`, `Animator`, `AnimatorOptions`, `AnimationControls` |
+| Targets and values | `Target`, `CSSSelector`, `CSSValue`, `ValueStops`, `AnimationValues` |
 | Placement and mappings | `EntryPlacementOptions`, `AnimationMapping`, `SequenceMapping` |
-| Timing | `AnimationTimingOptions`, `AnimationPlaybackOptions`, `SequencePlaybackOptions`, `RepeatOptions`, `RepeatMode`, `Stagger`, `StaggerSpacing`, `StaggerOptions`, `StaggerOrigin`, `At`, `SequenceTimingEntries` |
+| Timing | `AnimationTimingOptions`, `PlaybackOptions`, `PlaybackDescriptor`, `RepeatOptions`, `RepeatMode`, `Stagger`, `StaggeredDelays`, `StaggerSpacing`, `StaggerOptions`, `StaggerOrigin` |
+| Sequence entries and positions | `SequenceTimingEntries`, `SequenceTimingEntry`, `AnimationTimingEntry`, `SubsequenceTimingEntry`, `At`, `PositionDescriptor`, `PositionReference`, `PositionAnchor`, `PositionOffset` |
 | Transitions | `TransitionOptions`, `EasedTransitionOptions`, `SpringTransitionOptions`, `DurationSpringTransitionOptions`, `VisualSpringTransitionOptions`, `PhysicalSpringTransitionOptions` |
-| Easings | `EasingSpecifier`, `EasingPreset`, `CubicBezierEasingParams`, `StepsEasingParams`, `StepPosition`, `Easing` |
+| Easings | `EasingSpecifier`, `EasingPreset`, `CubicBezierEasingParams`, `StepsEasingParams`, `StepPosition` |
 | Units | `Seconds`, `Progress` |
 
-### 3.11 Errors
+### 3.10 Errors
 
 Every error has the type of what went wrong:
 
 | Type | Thrown for | Examples |
 |---|---|---|
 | `RangeError` | A number out of range | a negative duration, `NaN` or an infinite time, a `bounce` outside −1–1, a value key outside 0–1, a steps count below 1, a cubic Bézier `x` outside 0–1 |
-| `TypeError` | An input of the wrong shape or kind | a transition missing a required key or mixing kinds, an easing that isn't a preset or params, an unknown `repeatMode`, `step` with `spread`, no values or a `null` between the ends, a missing or extra property timing, a missing mapping entry, a value the property doesn't take, a constructor called outside its builder |
+| `TypeError` | An input of the wrong shape or kind | a transition missing a required key or mixing kinds, an easing that isn't a preset or params, an unknown `repeatMode`, `step` with `spread`, no values or a `null` between the ends, a missing mapping entry or one that isn't `[target, values]`, a value the property doesn't take, a sequence timing or its builder constructed directly |
 | `SyntaxError` | A position that doesn't parse | `'<0.2'`, `'+=1'`, `'<+1-1'` |
 | `Error` | Anything else | a duplicate or invalid name, a reference to a later entry, an empty sequence, a target with no elements, values that end up in different units, element counts that differ in a staggered sequence |
 
@@ -607,26 +627,28 @@ Every error has the type of what went wrong:
 |---|---|
 | `src/types.ts` | Units: `Seconds` and `Progress` |
 | `src/constants.ts` | `PRECISION`: how close two progresses must be to count as the same |
-| `src/easing-specifier.ts` | Easing specifiers and their params, `cubicBezier`, `steps`, the presets and `linear`, `checkEasingSpecifier` and `resolveEasing` |
-| `src/easing.ts` | The windowed easing classes, and the checks of their params |
+| `src/easing-specifier.ts` | Easing specifiers, `cubicBezier`, `steps`, the presets and `linear`, `checkEasingSpecifier` and `resolveEasing` |
+| `src/easing.ts` | The windowed easing classes, their params types (`CubicBezierEasingParams`, `StepsEasingParams`, `StepPosition`), and the checks of their params |
 | `src/cubic-bezier.ts` | Cubic Bézier math: coordinates, inverses, turning points, inflections, splitting |
 | `src/damped-spring.ts` | Closed-form damped springs in each damping regime: positions, turning times, rest time, and the factories each spring kind is made with: `physical`, `visual`, and `restingAt`, which solves a spring that comes to rest at a duration |
-| `src/transition.ts` | Transition options: their kinds, their keys, telling them apart, checking them, and resolving each one, once, into a duration and an easing |
-| `src/playback-options.ts` | `AnimationPlaybackOptions`, `SequencePlaybackOptions`, `RepeatOptions`, `RepeatMode` and `Stagger`, their checks and their clamps |
-| `src/stagger.ts` | `stagger`, `StaggerSpacing`, `StaggerOptions` and `StaggerOrigin` |
+| `src/transition.ts` | Transition options: their kinds, their keys, telling them apart, checking them, and resolving each one, once, into a `TransitionDescriptor` |
+| `src/playback-options.ts` | `PlaybackOptions`, `PlaybackDescriptor`, `RepeatOptions`, `RepeatMode`, `Stagger` and `StaggeredDelays`, their checks and their clamps, `staggeredDelaysOf` and `playbackDescriptorOf` |
+| `src/stagger.ts` | The `stagger` utility, `StaggerSpacing`, `StaggerOptions` and `StaggerOrigin` |
 | `src/animation.ts` | `AnimationTiming`, `AnimationTimingOptions` and `TimedTweenTiming`, with validation and clamping |
 | `src/at.ts` | `At`, `PositionDescriptor`, `parsePositionDescriptor`, `checkPositionDescriptor` and `resolvePosition` |
-| `src/sequence.ts` | `SequenceTimingBuilder`, `SequenceTiming` and its entries, with validation and clamping |
-| `src/definitions.ts` | `animation`, `sequence`, `AnimationDefinition`, `SequenceDefinition`, `SequenceDefinitionBuilder`, and splitting timings per property |
+| `src/sequence.ts` | `SequenceTimingBuilder`, `SequenceTiming` and its entries, with validation and clamping, and entry paths (`EntryPath`, `entryPathOf`) |
+| `src/definitions.ts` | `animation`, `sequence`, `AnimationDefinition`, `SequenceDefinition`, `SequenceDefinitionBuilder`, and checking a mapping against its sequence timing |
+| `src/animator.ts` | `animator` and the `Animator` interface |
 | `src/internals.ts` | The internals `site/` uses, which it imports as `timesfps/internals`; `tsconfig.json` leaves it out of the build |
-| `src/utils/validation.ts` | `checkNumber` and `checkPositive` |
+| `src/utils/validation.ts` | `checkNumber`, `checkPositive`, `requireNumber` and `requireProperty` |
+| `src/utils/environment.ts` | `isProduction`: whether a bundler built it for production, from `process.env.NODE_ENV`; false where `process` doesn't exist |
 | `src/utils/math.ts` | Interpolation and solving monotone functions |
 | `src/utils/records.ts` | Reading numeric-keyed records in order |
-| `src/resolution/layout.ts` | `layoutOf`: the layout tree of starts and ends, entry paths and staggered delays |
+| `src/resolution/layout.ts` | `layoutOf`: the layout tree of starts and ends, with each element's delay |
 | `src/resolution/stops.ts` | `PropertyStops` and `StopValue`: one property's values along the progress, resolved later |
 | `src/resolution/track-runs.ts` | `TrackSpan` and `TrackRun`: a track's values over time, and their iterations |
-| `src/dom/mapping.ts` | What binds a timing to the DOM, for any DOM adapter: targets, value forms, mapping types, the mapping tree, `PlayOptions`, and resolving targets |
-| `src/waapi/animator.ts` | `WAAPIAnimator`, which runs every step and creates the native animations |
+| `src/dom/mapping.ts` | What binds a timing to the DOM, for any DOM adapter: targets, value forms and their check, mapping types, the mapping tree, `AnimatorOptions`, and resolving targets |
+| `src/waapi/animator.ts` | `WAAPIAnimator`, the `Animator` for WAAPI, which runs every step and creates the native animations |
 | `src/waapi/controls.ts` | `AnimationControls`: playing, pausing, seeking and listening to the native animations together |
 | `src/waapi/css-values.ts` | CSS property names, value types, each target's stops as CSS text, and the page's value resolver |
 | `src/waapi/effect-chains.ts` | The values stage: effect chains, and resolving their values to numbers in one unit |
@@ -642,7 +664,7 @@ Relative imports end in `.ts`, and `rewriteRelativeImportExtensions` makes the b
 ## 5. Adaptation flow
 
 ```
-WAAPIAnimator.play(timing, mappingTree, {scope = document.documentElement})
+new WAAPIAnimator({scope}).animate(definition)    scope: document.documentElement by default
 │
 ├─ 1. Targets      resolveTargets                → Element[] per animation leaf
 ├─ 2. Values       resolveElementValues          → ElementValues[] per leaf (stops as CSS text)
@@ -780,9 +802,9 @@ For each target, property and effect, in order, the adapter calls `element.anima
 - keyframe values are their CSS text;
 - times are converted to milliseconds;
 - `float` and `offset` become `cssFloat` and `cssOffset`, since `offset` is the keyframe's own;
-- the animation's `id` is its entry path and property, `path:property`, or the property alone for an animation on its own (§3.8).
+- the animation's `id` is its entry path and property, `path:property`, or the property alone for an animation on its own (§3.7).
 
-`play` returns an `AnimationControls` over the native `Animation`s. It plays, pauses, cancels, finishes and seeks all of them together, and sets their playback rate and start time, in seconds. `finished` settles once they all have. `onFinish` and `onCancel` call a listener each time every animation has dispatched that event, and return a function that removes it.
+`animate` returns an `AnimationControls` over the native `Animation`s. It plays, pauses, cancels, finishes and seeks all of them together, and sets their playback rate and start time, in seconds. `finished` settles once they all have. `onFinish` and `onCancel` call a listener each time every animation has dispatched that event, and return a function that removes it.
 
 ## 6. Decisions
 
@@ -798,7 +820,7 @@ For each target, property and effect, in order, the adapter calls `element.anima
 | Animations are unnamed; entries are named | The same animation can be placed many times |
 | Positions and references are local to each sequence | Entry names only need to be unique within their sequence |
 | The layout is resolved at adaptation | Staggers depend on the element count, which only the mapping gives |
-| Errors by kind: `RangeError`, `TypeError`, `SyntaxError`, `Error` | A caller can tell a bad number, a bad shape, a bad position and a bad state apart (§3.11) |
+| Errors by kind: `RangeError`, `TypeError`, `SyntaxError`, `Error` | A caller can tell a bad number, a bad shape, a bad position and a bad state apart (§3.10) |
 | Leaves keyed by entry path | Definitions are reusable, so identity is the place in the tree, not the object |
 | Values resolved per target, through probes | Relative units depend on the element; probes are untouched by animations and give absolute values |
 | Values resolved after the fill conflicts | A missing 0 depends on which effect shows at the entry's start, and only interpolation needs numbers |
@@ -823,7 +845,7 @@ It compares the result with the definitions' own math, sampled at times that mis
 
 The cases cover single animations, sequence loops, reverses and mirrors with offset entries, and inner repeats baked inside outer ones. Easings are cubic Bézier (including overshoot), jump-start and jump-end steps, and springs. Layout, timing, fill and drop cases are checked exactly.
 
-`tests/animation.test.ts` covers timings: validation and clamping, telling transition kinds apart, splitting `AnimationTimingOptions`, the `DampedSpring` factories, and staggers. `tests/sequence.test.ts` covers positions (parsing, one offset of each kind in order, and resolving every reference and share), sequence timings, targets, value forms, and definitions: naming, immutability, property splits and mapping trees.
+`tests/animation.test.ts` covers timings: validation and clamping, telling transition kinds apart, splitting `AnimationTimingOptions`, the `DampedSpring` factories, and staggers. `tests/sequence.test.ts` covers positions (parsing, one offset of each kind in order, and resolving every reference and share), sequence timings, targets, value forms, and definitions: values checked as they're made, naming, immutability and mapping trees.
 
 Effect chains are tested through a stand-in `CSSValueResolver` that takes plain numbers and gives every property a current value of 0.25. The tests run without a DOM. `tests/play.test.ts` plays definitions on a stand-in one and checks the animations' ids and staggered delays, but `domValueResolver`, probes and real elements have no tests yet.
 

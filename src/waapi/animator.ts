@@ -1,83 +1,91 @@
-import type {AnimationTiming} from "../animation.ts";
-import {layoutOf, entryPathOf, type EntryPath} from "../resolution/layout.ts";
-import {SequenceTiming} from "../sequence.ts";
+import type {AnimationTiming, AnimationTimingOptions} from "../animation.ts";
+import {animation, AnimationDefinition, type Definition, sequence, SequenceDefinition} from "../definitions.ts";
+import type {Animator} from "../animator.ts";
+import {layoutOf} from "../resolution/layout.ts";
+import {entryPathOf, type EntryPath, SequenceTiming} from "../sequence.ts";
 import {AnimationControls} from "./controls.ts";
 import {domValueResolver, keyframePropertyOf, resolveElementValues} from "./css-values.ts";
-import {type AnimationMapping, type MappingTree, type PlayOptions, resolveTargets, type SequenceMappingNode} from "../dom/mapping.ts";
+import {
+    type AnimationMapping,
+    type AnimationValues,
+    type AnimatorOptions,
+    resolveTargets,
+    type SequenceMapping,
+    type Target
+} from "../dom/mapping.ts";
 import {cssEasingOf} from "./native-easing.ts";
 import {type AnimationTracks, AnimationTracksResolver, type ElementValues} from "./tracks.ts";
 
-/** Each animation leaf's values, and the path its animations are named by. */
-interface Leaves {
-    valuesByPath: Map<EntryPath, ElementValues[]>;
-    idPathByPath: Map<EntryPath, EntryPath | undefined>;
-}
-
-/** The tracks, and the path each leaf's animations are named by. */
-interface NamedTracks {
-    tracks: AnimationTracks;
-    idPathByPath: ReadonlyMap<EntryPath, EntryPath | undefined>;
-}
+type AnimationArgs = [target: Target, values: AnimationValues, timing: AnimationTiming | AnimationTimingOptions];
+type SequenceArgs = [timing: SequenceTiming, mapping: SequenceMapping];
+type DefinitionArgs = [definition: Definition];
 
 /**
- * Plays timings on elements with WAAPI.
- * It resolves the targets and values of the mapping, the layout of the timing, and the tracks those make, then creates an animation for each track's effects.
+ * Plays definitions on elements with WAAPI.
+ * It resolves the targets and values of the definition, the layout of its timing, and the tracks those make, then creates an animation for each track's effects.
  */
-export class WAAPIAnimator {
-    static play(
-        timing: AnimationTiming | SequenceTiming,
-        mapping: MappingTree,
-        {scope = document.documentElement}: PlayOptions = {}
-    ): AnimationControls {
-        const namedTracks = timing instanceof SequenceTiming
-            ? WAAPIAnimator.sequenceTracks(timing, mapping as SequenceMappingNode, scope)
-            : WAAPIAnimator.animationTracks(timing, mapping as AnimationMapping, scope);
-        return new AnimationControls(WAAPIAnimator.animate(namedTracks));
+export class WAAPIAnimator implements Animator {
+    readonly #options: AnimatorOptions;
+
+    constructor(options: AnimatorOptions = {}) {
+        this.#options = options;
     }
 
-    private static animationTracks(timing: AnimationTiming, mapping: AnimationMapping, scope: Element): NamedTracks {
+    animate(target: Target, values: AnimationValues, timing: AnimationTiming | AnimationTimingOptions): AnimationControls;
+    animate<Timing extends SequenceTiming>(timing: Timing, mapping: SequenceMapping<Timing>): AnimationControls;
+    animate(definition: Definition): AnimationControls;
+    animate(...args: AnimationArgs | SequenceArgs | DefinitionArgs): AnimationControls {
+        const definition = WAAPIAnimator.definitionOf(args);
+        const scope = this.#options.scope ?? document.documentElement;
+        const tracks = definition instanceof SequenceDefinition
+            ? WAAPIAnimator.sequenceTracks(definition.timing, definition.mapping, scope)
+            : WAAPIAnimator.animationTracks(definition.timing, [definition.target, definition.values], scope);
+        return new AnimationControls(WAAPIAnimator.nativeAnimationsOf(tracks));
+    }
+
+    /** A definition as given, or the one `animation` or `sequence` makes of the arguments. */
+    private static definitionOf(args: AnimationArgs | SequenceArgs | DefinitionArgs): Definition {
+        const [first] = args;
+        if (first instanceof AnimationDefinition || first instanceof SequenceDefinition) return first;
+        if (first instanceof SequenceTiming) return sequence(first, (args as SequenceArgs)[1]);
+        return animation(...args as AnimationArgs);
+    }
+
+    private static animationTracks(timing: AnimationTiming, mapping: AnimationMapping, scope: Element): AnimationTracks {
         const elementValues = WAAPIAnimator.elementValuesOf(mapping, scope);
-        const tracks = AnimationTracksResolver.resolve(layoutOf(timing, elementValues.length), () => elementValues, domValueResolver);
-        return {tracks, idPathByPath: new Map()};
+        return AnimationTracksResolver.resolve(layoutOf(timing, elementValues.length), () => elementValues, domValueResolver);
     }
 
-    private static sequenceTracks(sequence: SequenceTiming, mapping: SequenceMappingNode, scope: Element): NamedTracks {
-        const leaves: Leaves = {valuesByPath: new Map(), idPathByPath: new Map()};
-        WAAPIAnimator.resolveSequenceValues(sequence, mapping, undefined, undefined, scope, leaves);
-        const {valuesByPath, idPathByPath} = leaves;
+    private static sequenceTracks(sequence: SequenceTiming, mapping: SequenceMapping, scope: Element): AnimationTracks {
+        const valuesByPath = new Map<EntryPath, ElementValues[]>();
+        WAAPIAnimator.resolveSequenceValues(sequence, mapping, undefined, scope, valuesByPath);
         const elementCounts = new Map([...valuesByPath].map(([path, elementValues]) => [path, elementValues.length]));
-        const tracks = AnimationTracksResolver.resolve(layoutOf(sequence, elementCounts), path => valuesByPath.get(path)!, domValueResolver);
-        return {tracks, idPathByPath};
+        return AnimationTracksResolver.resolve(layoutOf(sequence, elementCounts), path => valuesByPath.get(path)!, domValueResolver);
     }
 
     private static resolveSequenceValues(
         sequence: SequenceTiming,
-        mapping: SequenceMappingNode,
+        mapping: SequenceMapping,
         path: EntryPath | undefined,
-        idPath: EntryPath | undefined,
         scope: Element,
-        leaves: Leaves
+        valuesByPath: Map<EntryPath, ElementValues[]>
     ): void {
-        for (const name of sequence.names) {
-            const entry = sequence.entries[name]!;
-            const entryPath = entryPathOf(path, name);
-            const entryIdPath = mapping.splitsProperties ? idPath : entryPathOf(idPath, name);
-            const entryMapping = mapping.entries[name]!;
+        for (const entry of sequence.entries) {
+            const entryPath = entryPathOf(path, entry.name);
+            const entryMapping = mapping[entry.name]!;
             if ('sequence' in entry)
-                WAAPIAnimator.resolveSequenceValues(entry.sequence, entryMapping as SequenceMappingNode, entryPath, entryIdPath, scope, leaves);
-            else {
-                leaves.valuesByPath.set(entryPath, WAAPIAnimator.elementValuesOf(entryMapping as AnimationMapping, scope));
-                leaves.idPathByPath.set(entryPath, entryIdPath);
-            }
+                WAAPIAnimator.resolveSequenceValues(entry.sequence, entryMapping as SequenceMapping, entryPath, scope, valuesByPath);
+            else
+                valuesByPath.set(entryPath, WAAPIAnimator.elementValuesOf(entryMapping as AnimationMapping, scope));
         }
     }
 
-    private static elementValuesOf({target, values}: AnimationMapping, scope: Element): ElementValues[] {
+    private static elementValuesOf([target, values]: AnimationMapping, scope: Element): ElementValues[] {
         return resolveElementValues(resolveTargets(target, scope), values);
     }
 
     /** Creates the effects in their tracks' order, so the ones declared later show over the earlier ones; each is named by its entry's path and its property. */
-    private static animate({tracks, idPathByPath}: NamedTracks): Animation[] {
+    private static nativeAnimationsOf(tracks: AnimationTracks): Animation[] {
         return [...tracks].flatMap(([element, effectsByProperty]) => Object.entries(effectsByProperty).flatMap(([property, effects]) => {
             const keyframeProperty = keyframePropertyOf(property);
             return effects.map(({keyframes, easing, delay, duration, iterations, direction, fill, path}) => {
@@ -89,8 +97,7 @@ export class WAAPIAnimator {
                     })),
                     {delay: delay * 1000, duration: duration * 1000, iterations, direction, fill, easing: cssEasingOf(easing)}
                 );
-                const idPath = path === undefined ? undefined : idPathByPath.get(path);
-                animation.id = idPath ? `${idPath}:${property}` : property;
+                animation.id = path ? `${path}:${property}` : property;
                 return animation;
             });
         }));

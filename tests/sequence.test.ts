@@ -1,4 +1,4 @@
-import {describe, expect, it} from "vitest";
+import {describe, expect, it, vi} from "vitest";
 import {AnimationTiming} from "../src/animation.ts";
 import {type At, parsePositionDescriptor, resolvePosition} from "../src/at.ts";
 import {animation, sequence} from "../src/definitions.ts";
@@ -10,14 +10,16 @@ const second = AnimationTiming.of({duration: 1});
 
 const offset = (seconds: number, referenceFraction = 0, selfFraction = 0) => ({seconds, referenceFraction, selfFraction});
 
+const namesOf = (timing: SequenceTiming) => timing.entries.map(({name}) => name);
+
 describe("parsePositionDescriptor", () => {
     it("reads the previous entry's end and start, the start of the sequence, and the end of everything so far", () => {
-        expect(parsePositionDescriptor('')).toEqual({reference: {kind: 'previous-entry'}, anchor: 'end', offset: offset(0)});
-        expect(parsePositionDescriptor('>')).toEqual({reference: {kind: 'previous-entry'}, anchor: 'end', offset: offset(0)});
-        expect(parsePositionDescriptor('-0.3' as At<never>)).toEqual({reference: {kind: 'previous-entry'}, anchor: 'end', offset: offset(-0.3)});
-        expect(parsePositionDescriptor('<+0.1' as At<never>)).toEqual({reference: {kind: 'previous-entry'}, anchor: 'start', offset: offset(0.1)});
-        expect(parsePositionDescriptor('<<')).toEqual({reference: {kind: 'everything-so-far'}, anchor: 'start', offset: offset(0)});
-        expect(parsePositionDescriptor('>>+0.5' as At<never>)).toEqual({reference: {kind: 'everything-so-far'}, anchor: 'end', offset: offset(0.5)});
+        expect(parsePositionDescriptor('')).toEqual({reference: {kind: 'previousEntry'}, anchor: 'end', offset: offset(0)});
+        expect(parsePositionDescriptor('>')).toEqual({reference: {kind: 'previousEntry'}, anchor: 'end', offset: offset(0)});
+        expect(parsePositionDescriptor('-0.3' as At<never>)).toEqual({reference: {kind: 'previousEntry'}, anchor: 'end', offset: offset(-0.3)});
+        expect(parsePositionDescriptor('<+0.1' as At<never>)).toEqual({reference: {kind: 'previousEntry'}, anchor: 'start', offset: offset(0.1)});
+        expect(parsePositionDescriptor('<<')).toEqual({reference: {kind: 'everythingSoFar'}, anchor: 'start', offset: offset(0)});
+        expect(parsePositionDescriptor('>>+0.5' as At<never>)).toEqual({reference: {kind: 'everythingSoFar'}, anchor: 'end', offset: offset(0.5)});
     });
 
     it("reads a number as an offset in seconds from the start of the sequence", () => {
@@ -74,14 +76,14 @@ describe("SequenceTimingBuilder", () => {
     });
 
     it("clamps negative delays and repeats to 0 and rounds fractional repeat counts down", () => {
-        expect(builder().build({delay: -3, repeat: -2.5, repeatDelay: -1}).options).toEqual({delay: 0, repeat: 0, repeatDelay: 0});
-        expect(builder().build({repeat: 2.7}).options.repeat).toBe(2);
+        expect(builder().build({delay: -3, repeat: -2.5, repeatDelay: -1}).playback).toEqual({delay: 0, repeat: 0, repeatDelay: 0});
+        expect(builder().build({repeat: 2.7}).playback.repeat).toBe(2);
     });
 
     it("takes a transition together with its timing's options", () => {
         const timing = SequenceTiming.builder().add({duration: 1, delay: 0.5, repeat: 2}, 'a').build();
-        expect(timing.entries.a.timing.options).toEqual({delay: 0.5, repeat: 2});
-        expect(timing.entries.a.timing.transition).toEqual({duration: 1});
+        expect(timing.entries[0].animation.playback).toEqual({delay: 0.5, repeat: 2});
+        expect(timing.entries[0].animation.transition).toEqual({duration: 1});
     });
 
     it("rejects positions it can't parse, whose time isn't finite, or that refer to a later entry", () => {
@@ -98,16 +100,26 @@ describe("SequenceTimingBuilder", () => {
     it("gives a new builder from every add, so branches don't share entries", () => {
         const trunk = builder();
         const branch = trunk.add(second, 'b');
-        expect(trunk.build().names).toEqual(['a']);
-        expect(branch.build().names).toEqual(['a', 'b']);
+        expect(namesOf(trunk.build())).toEqual(['a']);
+        expect(namesOf(branch.build())).toEqual(['a', 'b']);
         expect(() => SequenceTiming.builder().build()).toThrow();
     });
 });
 
 describe("SequenceTiming", () => {
     it("can only be made by its builder", () => {
-        expect(() => new (SequenceTiming as unknown as new (...args: unknown[]) => SequenceTiming)(['a'], {})).toThrow();
-        expect(() => new (SequenceTiming.builder().constructor as new () => unknown)()).toThrow();
+        expect(() => new (SequenceTiming as unknown as new (...args: unknown[]) => SequenceTiming)([], {})).toThrow("A SequenceTiming can only be created using SequenceTimingBuilder.");
+        expect(() => new (SequenceTiming.builder().constructor as new () => unknown)()).toThrow("Use SequenceTiming.builder to create a SequenceTimingBuilder.");
+    });
+
+    it("names no class when it's built for production", () => {
+        vi.stubEnv('NODE_ENV', 'production');
+        try {
+            expect(() => new (SequenceTiming as unknown as new (...args: unknown[]) => SequenceTiming)([], {})).toThrow("Illegal constructor");
+            expect(() => new (SequenceTiming.builder().constructor as new () => unknown)()).toThrow("Illegal constructor");
+        } finally {
+            vi.unstubAllEnvs();
+        }
     });
 });
 
@@ -178,31 +190,10 @@ describe("value forms", () => {
 });
 
 describe("animation", () => {
-    it("splits timings per property into entries that start together, on the same target", () => {
-        const definition = animation('.card', {translate: [40, 0], opacity: [0, 1]}, {
-            translate: {duration: 0.6, bounce: 0.2},
-            opacity: {duration: 0.2}
-        });
-        const {timing, mapping} = definition.mappedTiming;
-        expect(timing).toBeInstanceOf(SequenceTiming);
-        expect((timing as SequenceTiming).names).toEqual(['a', 'b']);
-        expect(mapping).toEqual({
-            entries: {
-                a: {target: '.card', values: {translate: [40, 0]}},
-                b: {target: '.card', values: {opacity: [0, 1]}}
-            },
-            splitsProperties: true
-        });
-    });
-
-    it("needs a timing for each property and no other", () => {
-        expect(() => animation('.card', {translate: [40, 0], opacity: [0, 1]}, {translate: {duration: 1}} as never)).toThrow();
-        expect(() => animation('.card', {opacity: [0, 1]}, {opacity: {duration: 1}, scale: {duration: 1}} as never)).toThrow();
-    });
-
-    it("takes a property named like a transition key as a property", () => {
-        const definition = animation('.card', {duration: [0, 1]}, {duration: {duration: 1}});
-        expect(definition.mappedTiming.timing).toBeInstanceOf(SequenceTiming);
+    it("checks the values' forms as it's made", () => {
+        expect(() => animation('.card', {opacity: []}, {duration: 1})).toThrow(TypeError);
+        expect(() => animation('.card', {opacity: {1.5: 1}}, {duration: 1})).toThrow(RangeError);
+        expect(animation('.card', {opacity: [0, 1]}, {duration: 1})).toMatchObject({target: '.card', values: {opacity: [0, 1]}});
     });
 });
 
@@ -212,10 +203,10 @@ describe("sequence", () => {
     it("names unnamed entries by their order, from a to z and on to aa", () => {
         let builder = sequence();
         for (let index = 0; index < 27; index++) builder = builder.add('.dot', {opacity: [0, 1]}, fade);
-        const {timing, mapping} = builder.build().mappedTiming;
-        expect((timing as SequenceTiming).names.slice(0, 2)).toEqual(['a', 'b']);
-        expect((timing as SequenceTiming).names.slice(-2)).toEqual(['z', 'aa']);
-        expect((mapping as {entries: object}).entries).toMatchObject({aa: {target: '.dot', values: {opacity: [0, 1]}}});
+        const {timing, mapping} = builder.build();
+        expect(namesOf(timing).slice(0, 2)).toEqual(['a', 'b']);
+        expect(namesOf(timing).slice(-2)).toEqual(['z', 'aa']);
+        expect(mapping).toMatchObject({aa: ['.dot', {opacity: [0, 1]}]});
     });
 
     it("names unnamed entries around the names given", () => {
@@ -224,7 +215,7 @@ describe("sequence", () => {
             .add('h2', {opacity: [0, 1]}, fade, {name: 'a'})
             .add('h3', {opacity: [0, 1]}, fade)
             .build();
-        expect((definition.mappedTiming.timing as SequenceTiming).names).toEqual(['b', 'a', 'c']);
+        expect(namesOf(definition.timing)).toEqual(['b', 'a', 'c']);
     });
 
     it("takes definitions, named or not, and positions that refer to the names given", () => {
@@ -235,17 +226,17 @@ describe("sequence", () => {
             .add(fadeIn, {at: 'title<+0.2'})
             .add(nested, {name: 'cta', at: 'title>'})
             .build();
-        const {timing, mapping} = definition.mappedTiming as {timing: SequenceTiming; mapping: {entries: {[name: string]: unknown}}};
-        expect(timing.names).toEqual(['title', 'a', 'cta']);
-        expect(timing.entries.a!.position).toEqual({reference: {kind: 'entry', name: 'title'}, anchor: 'start', offset: offset(0.2)});
-        expect(mapping.entries.title).toEqual({target: 'h1', values: {opacity: [0, 1]}});
-        expect(mapping.entries.cta).toEqual({entries: {a: {target: '#cta', values: {scale: [0.8, 1]}}}, splitsProperties: false});
+        const {timing, mapping} = definition as {timing: SequenceTiming; mapping: {[name: string]: unknown}};
+        expect(namesOf(timing)).toEqual(['title', 'a', 'cta']);
+        expect(timing.entries[1]!.position).toEqual({reference: {kind: 'entry', name: 'title'}, anchor: 'start', offset: offset(0.2)});
+        expect(mapping.title).toEqual(['h1', {opacity: [0, 1]}]);
+        expect(mapping.cta).toEqual({a: ['#cta', {scale: [0.8, 1]}]});
     });
 
     it("gives a new builder from every add", () => {
         const trunk = sequence().add('h1', {opacity: [0, 1]}, fade);
         trunk.add('h2', {opacity: [0, 1]}, fade);
-        expect((trunk.build().mappedTiming.timing as SequenceTiming).names).toEqual(['a']);
+        expect(namesOf(trunk.build().timing)).toEqual(['a']);
     });
 
     it("only lets positions refer to the names given before them, which its sequence timing checks as it's built", () => {
@@ -261,17 +252,17 @@ describe("sequence", () => {
         const inner = SequenceTiming.builder().add(fade, 'glow').build();
         const timing = SequenceTiming.builder().add(fade, 'title').add(inner, 'card').build();
         const definition = sequence(timing, {
-            title: {target: 'h1', values: {opacity: [0, 1]}},
-            card: {glow: {target: '.card', values: {opacity: [0, 1]}}}
+            title: ['h1', {opacity: [0, 1]}],
+            card: {glow: ['.card', {opacity: [0, 1]}]}
         });
-        expect(definition.mappedTiming.mapping).toEqual({
-            entries: {
-                title: {target: 'h1', values: {opacity: [0, 1]}},
-                card: {entries: {glow: {target: '.card', values: {opacity: [0, 1]}}}, splitsProperties: false}
-            },
-            splitsProperties: false
+        expect(definition.mapping).toEqual({
+            title: ['h1', {opacity: [0, 1]}],
+            card: {glow: ['.card', {opacity: [0, 1]}]}
         });
-        expect(() => sequence(timing, {title: {target: 'h1', values: {opacity: 1}}} as never)).toThrow('No mapping present for "card".');
-        expect(() => sequence(timing, {title: {target: 'h1', values: {opacity: 1}}, card: {}} as never)).toThrow('No mapping present for "card>glow".');
+        expect(() => sequence(timing, {title: ['h1', {opacity: 1}]} as never)).toThrow('No mapping present for "card".');
+        expect(() => sequence(timing, {title: ['h1', {opacity: 1}], card: {}} as never)).toThrow('No mapping present for "card>glow".');
+        expect(() => sequence(timing, {title: {target: 'h1', values: {opacity: 1}}, card: {glow: ['.card', {opacity: 1}]}} as never))
+            .toThrow('The mapping of "title" needs a target and values.');
+        expect(() => sequence(timing, {title: ['h1', {opacity: []}], card: {glow: ['.card', {opacity: 1}]}})).toThrow(TypeError);
     });
 });

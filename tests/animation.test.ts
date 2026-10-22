@@ -1,5 +1,5 @@
 import {describe, expect, it} from "vitest";
-import {AnimationTiming, TimedTweenTiming} from "../src/animation.ts";
+import {AnimationTiming} from "../src/animation.ts";
 import {DampedSpring} from "../src/damped-spring.ts";
 import {PRECISION} from "../src/constants.ts";
 import {stagger} from "../src/stagger.ts";
@@ -11,22 +11,16 @@ describe("AnimationTiming.of", () => {
         expect(() => AnimationTiming.of({visualDuration: Infinity, bounce: 0})).toThrow(RangeError);
         expect(() => AnimationTiming.of({duration: 1}, {delay: Infinity})).toThrow(RangeError);
         expect(() => AnimationTiming.of({duration: 1}, {repeatDelay: NaN})).toThrow(RangeError);
-        expect(() => new TimedTweenTiming([{name: 'a', transition: {duration: 1}, delay: NaN}])).toThrow(RangeError);
-        expect(() => new TimedTweenTiming([{name: 'a', transition: {duration: 1}, repeatDelay: Infinity}])).toThrow(RangeError);
-        expect(() => new TimedTweenTiming([{name: 'a', transition: {duration: Infinity}}])).toThrow(RangeError);
     });
 
     it("rejects a repeat count that isn't a number, and a tween's infinite one", () => {
         expect(() => AnimationTiming.of({duration: 1}, {repeat: NaN})).toThrow(RangeError);
         expect(() => AnimationTiming.of({duration: 1}, {repeat: Infinity})).not.toThrow();
-        expect(() => new TimedTweenTiming([{name: 'a', transition: {duration: 1}, repeat: Infinity}])).toThrow(RangeError);
     });
 
     it("clamps negative delays and repeats to 0 and rounds fractional repeat counts down", () => {
-        expect(AnimationTiming.of({duration: 1}, {delay: -1, repeat: -1.5, repeatDelay: -1}).options).toEqual({delay: 0, repeat: 0, repeatDelay: 0});
-        expect(AnimationTiming.of({duration: 1}, {repeat: 2.7}).options.repeat).toBe(2);
-        const [tween] = new TimedTweenTiming([{name: 'a', transition: {duration: 1}, delay: -2, repeat: 1.5, repeatDelay: -1}]).tweens;
-        expect(tween).toMatchObject({delay: 0, repeat: 1, repeatDelay: 0});
+        expect(AnimationTiming.of({duration: 1}, {delay: -1, repeat: -1.5, repeatDelay: -1}).playback).toEqual({delay: 0, repeat: 0, repeatDelay: 0});
+        expect(AnimationTiming.of({duration: 1}, {repeat: 2.7}).playback.repeat).toBe(2);
     });
 
     it("rejects negative durations, and spring options no spring can come to rest with", () => {
@@ -63,14 +57,14 @@ describe("AnimationTiming.of with a descriptor", () => {
     it("splits a descriptor into its transition and its options", () => {
         const timing = AnimationTiming.of({duration: 0.6, bounce: 0.2, delay: 0.1, repeat: 2, repeatMode: 'mirror'});
         expect(timing.transition).toEqual({duration: 0.6, bounce: 0.2});
-        expect(timing.options).toEqual({delay: 0.1, repeat: 2, repeatMode: 'mirror'});
+        expect(timing.playback).toEqual({delay: 0.1, repeat: 2, repeatMode: 'mirror'});
     });
 
     it("gives the same timing as the transition and options passed apart", () => {
         const spread = AnimationTiming.of({duration: 0.4, easing: 'easeOut', delay: 0.2});
         const apart = AnimationTiming.of({duration: 0.4, easing: 'easeOut'}, {delay: 0.2});
         expect(spread.transition).toEqual(apart.transition);
-        expect(spread.options).toEqual(apart.options);
+        expect(spread.playback).toEqual(apart.playback);
     });
 });
 

@@ -1,4 +1,4 @@
-import type {SubsequenceTimingEntry, SequenceTiming, SequenceTimingEntries} from "../sequence.ts";
+import type {SequenceTiming, SubsequenceTimingEntry} from "../sequence.ts";
 import {sortedByKey} from "../utils/records.ts";
 
 export type CSSSelector = string;
@@ -6,7 +6,7 @@ export type CSSSelector = string;
 /** Elements, or what finds them in the scope. */
 export type Target = Element | Iterable<Element> | CSSSelector | ((scope: Element) => Element | Iterable<Element>);
 
-export interface PlayOptions {
+export interface AnimatorOptions {
     /** Where selectors and target functions look for elements; the document's root element by default. */
     scope?: Element;
 }
@@ -24,28 +24,19 @@ export type AnimationValues = {
 };
 
 /** The targets and values of an animation timing's entry. */
-export interface AnimationMapping {
-    target: Target;
-    values: AnimationValues;
-}
+export type AnimationMapping = [target: Target, values: AnimationValues];
 
 /** A sequence timing's targets and values, keyed by entry name, with a nested mapping for each nested sequence timing. */
-export type SequenceMapping<Timing extends SequenceTiming> = Timing extends SequenceTiming<infer SE> ?
+export type SequenceMapping<Timing extends SequenceTiming = SequenceTiming> = Timing extends SequenceTiming<infer Entries> ?
     {
-        [N in keyof SE]: SE[N] extends SubsequenceTimingEntry<infer NS> ?
-            SequenceMapping<NS> :
+        [Entry in Entries[number] as Entry['name']]: Entry extends SubsequenceTimingEntry<string, infer Subsequence extends SequenceTiming> ?
+            SequenceMapping<Subsequence> :
             AnimationMapping;
     } :
     never;
 
-/** A mapping as it's played: a leaf for each animation, and a node for each sequence. */
-export type MappingTree = AnimationMapping | SequenceMappingNode;
-
-export interface SequenceMappingNode {
-    entries: { readonly [name: string]: MappingTree };
-    /** Whether the sequence splits one animation into an entry per property, so its level is left out of animation ids. */
-    splitsProperties: boolean;
-}
+/** A mapping as it's played: an animation's, or a sequence's. */
+export type MappingTree = AnimationMapping | SequenceMapping;
 
 /** The values as stops keyed by progress, with the missing ones left out; a single value is the last, as in WAAPI. */
 export function progressStopsOf(property: string, valueStops: ValueStops): [progress: number, value: CSSValue][] {
@@ -65,6 +56,11 @@ export function progressStopsOf(property: string, valueStops: ValueStops): [prog
     const stops = given.filter((stop): stop is [number, CSSValue] => stop[1] !== null);
     if (stops.length === 0) throw new TypeError(`"${property}" has no values.`);
     return stops;
+}
+
+/** Every property's values must take one of the forms, as `progressStopsOf` reads them. */
+export function checkAnimationValues(values: AnimationValues): void {
+    for (const [property, valueStops] of Object.entries(values)) progressStopsOf(property, valueStops);
 }
 
 function listedStopsOf(values: readonly (CSSValue | null)[]): [number, CSSValue | null][] {

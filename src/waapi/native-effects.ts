@@ -1,10 +1,10 @@
 import type {CubicBezier} from "../cubic-bezier.ts";
-import {CubicBezierEasing, type Easing, LinearEasing, SpringEasing, StepsEasing} from "../easing.ts";
-import {type CubicBezierEasingParams, linear} from "../easing-specifier.ts";
+import {CubicBezierEasing, type CubicBezierEasingParams, type Easing, LinearEasing, SpringEasing, StepsEasing} from "../easing.ts";
+import {linear} from "../easing-specifier.ts";
 import type {DampedSpring} from "../damped-spring.ts";
 import type {PropertyStops, StopValue} from "../resolution/stops.ts";
-import type {EntryPath} from "../resolution/layout.ts";
 import type {TrackRun, TrackSpan} from "../resolution/track-runs.ts";
+import type {EntryPath} from "../sequence.ts";
 import type {Progress, Seconds} from "../types.ts";
 import {invLerp, lerp} from "../utils/math.ts";
 import {sortedByKey} from "../utils/records.ts";
@@ -191,10 +191,10 @@ function curveSegmentsOf(easing: Easing): CurveSegment[] {
         if (coveredEnd <= coveredStart) return [];
 
         const [entry, exit] = windowStart <= windowEnd ? [coveredStart, coveredEnd] : [coveredEnd, coveredStart];
-        const pieceOffsetOf = (input: number) => invLerp(input, startInput, endInput);
+        const pieceOffsetOf = (input: number) => invLerp(startInput, endInput, input);
         return [{
-            startOffset: invLerp(entry, windowStart, windowEnd),
-            endOffset: invLerp(exit, windowStart, windowEnd),
+            startOffset: invLerp(windowStart, windowEnd, entry),
+            endOffset: invLerp(windowStart, windowEnd, exit),
             easing: pieceEasing.windowed(pieceOffsetOf(entry), pieceOffsetOf(exit)),
             fromProgress,
             toProgress
@@ -234,7 +234,7 @@ function splitAtStops({startOffset, endOffset, easing, fromProgress, toProgress}
     const crossings = stops
         .stopsBetween(progressOf(startEased), progressOf(endEased))
         .flatMap(({progress}) => {
-            const eased = invLerp(progress, fromProgress, toProgress);
+            const eased = invLerp(fromProgress, toProgress, progress);
             const [offset] = easing.offsetsAt(eased);
             return offset === undefined ? [] : [{offset, eased}];
         })
@@ -286,7 +286,7 @@ function cubicBezierPiecesOf(easing: CubicBezierEasing): NativePiece[] {
     const lowParameter = curve.parameterAt('x', low);
     const highParameter = curve.parameterAt('x', high);
     const [, fromLow] = curve.splitAt(lowParameter);
-    const [window] = fromLow.splitAt(invLerp(highParameter, lowParameter, 1));
+    const [window] = fromLow.splitAt(invLerp(lowParameter, 1, highParameter));
     const forwardPieces = stretchedPiecesOf(window);
     const pieces = windowStart <= windowEnd ? forwardPieces : forwardPieces.map((piece, index): StretchedPiece => {
         const start = forwardPieces[index - 1] ?? {offset: 0, progress: 0};
@@ -315,8 +315,8 @@ function stretchedPiecesOf(curve: CubicBezier): StretchedPiece[] {
     return parts.map(part => {
         const [x1, y1, x2, y2] = stretchedDefinitionOf(part);
         return {
-            offset: invLerp(part.end.x, curve.start.x, curve.end.x),
-            progress: invLerp(part.end.y, curve.start.y, curve.end.y),
+            offset: invLerp(curve.start.x, curve.end.x, part.end.x),
+            progress: invLerp(curve.start.y, curve.end.y, part.end.y),
             definition: [clampToTime(x1), y1, clampToTime(x2), y2]
         };
     });
@@ -329,7 +329,7 @@ function isWithinTime(x: number): boolean {
 /** The control points of the curve stretched to run from (0, 0) to (1, 1). */
 function stretchedDefinitionOf(curve: CubicBezier): CubicBezierEasingParams {
     const {start, end} = curve;
-    const stretch = ({x, y}: { x: number; y: number }) => [invLerp(x, start.x, end.x), invLerp(y, start.y, end.y)] as const;
+    const stretch = ({x, y}: { x: number; y: number }) => [invLerp(start.x, end.x, x), invLerp(start.y, end.y, y)] as const;
     return [...stretch(curve.control1), ...stretch(curve.control2)];
 }
 
@@ -341,7 +341,7 @@ function stepsEasingOf(easing: StepsEasing, startEased: Progress, endEased: Prog
     const points: LinearPoint[] = [{input: 0, output: 0}];
     bounds.slice(1).forEach((end, index) => {
         const start = bounds[index]!;
-        const level = invLerp(easing.progressAt((start + end) / 2), startEased, endEased);
+        const level = invLerp(startEased, endEased, easing.progressAt((start + end) / 2));
         points.push({input: start, output: level}, {input: end, output: level});
     });
     points.push({input: 1, output: 1});

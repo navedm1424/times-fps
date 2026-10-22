@@ -32,28 +32,31 @@ You build everything with two functions:
 - **`animation(target, values, timing)`** defines one animation: which elements, which values, and how it moves through them.
 - **`sequence()`** lays animations out in time, and nests other sequences.
 
-Both give you a **definition**. A definition doesn't play until you call `play()`, and you can play it as many times as you like.
+Both give you a **definition**, which an **animator** plays (see Controls). `animator()` gives you one, and its `animate()` takes a definition, or takes `animation()`'s arguments to play one animation right away. You can play a definition as many times as you like.
 
 ```ts
-import {animation, sequence, stagger} from "timesfps";
+import {animator, sequence, stagger} from "timesfps";
+
+const page = animator();
 
 // A fade with a CSS easing.
-animation('.card', {opacity: [0, 1], scale: [0.95, 1]}, {duration: 0.4, easing: 'easeOut'}).play();
+page.animate('.card', {opacity: [0, 1], scale: [0.95, 1]}, {duration: 0.4, easing: 'easeOut'});
 
 // A springy pulse that ripples out from the middle dot, forever.
-animation('.dot', {scale: [1, 1.4]}, {
+page.animate('.dot', {scale: [1, 1.4]}, {
     visualDuration: 0.3, bounce: 0.4,
     delay: stagger(0.05, {from: 'center'}),
     repeat: Infinity, repeatMode: 'mirror', repeatDelay: 0.6
-}).play();
+});
 
 // A choreographed intro that plays twice: forwards, then backwards.
-sequence()
+const intro = sequence()
     .add('h1', {opacity: [0, 1], translate: [-40, 0]}, {duration: 0.6, bounce: 0.2}, {name: 'title'})
     .add('h2', {opacity: [0, 1]}, {duration: 0.4, easing: 'easeOut'}, {at: '-0.3'})
     .add('#cta', {scale: [0.8, 1]}, {stiffness: 300, damping: 20}, {at: 'title<+50%'})
-    .build({repeat: 1, repeatMode: 'reverse'})
-    .play();
+    .build({repeat: 1, repeatMode: 'reverse'});
+
+page.animate(intro);
 
 // One definition, played in two places: each card lifts, and its icon fades in a quarter of the way through.
 const cards = sequence()
@@ -61,8 +64,8 @@ const cards = sequence()
     .add('.card .icon', {opacity: [0, 1]}, {duration: 0.3}, {at: 'lift<+25%'})
     .build({delay: stagger(0.1)});
 
-cards.play({scope: featuredList});
-cards.play({scope: archiveList});
+animator({scope: featuredList}).animate(cards);
+animator({scope: archiveList}).animate(cards);
 ```
 
 <br/><br/>
@@ -79,7 +82,7 @@ animation(target, values, timing)
 | `values` | The CSS values each property moves through. |
 | `timing` | How long it takes, how it moves, when it starts and how it repeats. |
 
-It returns an `AnimationDefinition`. Nothing is looked up or read until you call `play()`.
+It returns an `AnimationDefinition`. Nothing is looked up or read until you play it.
 
 ### Targets
 
@@ -90,7 +93,7 @@ It returns an `AnimationDefinition`. Nothing is looked up or read until you call
 | A CSS selector, looked up in the scope | `animation('.card', …)` |
 | A function that finds elements in the scope | `animation(scope => scope.querySelectorAll('li'), …)` |
 
-- The **scope** is the element you pass to `play({scope})`. It defaults to `document.documentElement`.
+- The **scope** is the element you pass to `animator({scope})`. It defaults to `document.documentElement`.
 - A function can return one element, or any iterable of them, such as an array or a `NodeList`.
 - Each element is animated once, even if the target lists it twice.
 - A target that matches no elements throws when you play.
@@ -118,7 +121,7 @@ animation('.card', {
 | `{0: 0}` or `[0, null]` | from 0, to the value underneath |
 | `[null, 1]` | from the value underneath, to 1, the same as `1` |
 
-- **The value underneath** is what the property would show at that moment without this animation: the value an earlier animation leaves it at, or, with none, the property's current value when you call `play()`.
+- **The value underneath** is what the property would show at that moment without this animation: the value an earlier animation leaves it at, or, with none, the property's current value when you call `animate()`.
 - `null` stands for the value underneath. It's only allowed at the start or the end.
 - Keys outside 0–1 throw.
 
@@ -248,8 +251,8 @@ stagger({step: 0.05, from: 'last', easing: 'easeOut'})
 | Option | Meaning |
 |---|---|
 | `step` | Seconds between neighbouring elements. |
-| `spread` | Seconds the farthest element waits after the first. Give either `step` or `spread`. |
-| `startDelay` | Seconds the first element waits, added to every delay. `0` by default. |
+| `spread` | Seconds the farthest elements wait after the one at `from`. Give either `step` or `spread`. |
+| `startDelay` | Seconds the element at `from` waits, added to every delay. `0` by default. |
 | `from` | Which element goes first: `'first'` (the default), `'last'`, `'center'`, or an index. |
 | `easing` | Spreads the delays along an easing instead of evenly. |
 
@@ -263,19 +266,6 @@ stagger(0.05, {from: 'last', easing: 'easeOut'})
 `spread` is only given by name, in the object.
 
 A stagger is just a function `(index, total) => seconds`, so you can pass your own as `delay` too. `step`, `spread`, `startDelay` and an index `from` must be finite numbers. A delay that comes out negative becomes 0.
-
-#### A timing for each property
-
-To give properties their own timing, pass a timing per property instead. Every property in `values` needs one:
-
-```ts
-animation('.card', {translate: [40, 0], opacity: [0, 1]}, {
-    translate: {duration: 0.6, bounce: 0.2},
-    opacity: {duration: 0.2}
-}).play();
-```
-
-The properties start together, and each runs on its own timing.
 
 <br/><br/>
 
@@ -395,11 +385,12 @@ const page = sequence()
 A sequence's `delay` can be a stagger. The sequence then plays once for each element index: the copy at index 2 plays the third element of each of its animations, and its positions chain within that copy alone.
 
 ```ts
-sequence()
+const cards = sequence()
     .add('.card', {scale: [1, 1.05]}, {duration: 0.3}, {name: 'lift'})
     .add('.card .icon', {opacity: [0, 1]}, {duration: 0.5})
-    .build({delay: stagger(0.1)})
-    .play();
+    .build({delay: stagger(0.1)});
+
+animator().animate(cards);
 ```
 
 - Each card's icon fades in once that card has lifted.
@@ -432,7 +423,7 @@ animation('.card', {translate: [40, 0]}, rise);
 animation('.panel', {opacity: [0, 1]}, rise);
 ```
 
-`AnimationTiming.of(transition, playbackOptions?)` checks everything as soon as you call it, so mistakes throw where you make them. It goes wherever a timing does: as `animation()`'s timing, as an inline entry's timing, or as one property's timing.
+`AnimationTiming.of(transition, playbackOptions?)` checks everything as soon as you call it, so mistakes throw where you make them. It goes wherever a timing does: as `animation()`'s timing, or as an inline entry's timing.
 
 ### `SequenceTiming`
 
@@ -452,29 +443,37 @@ const reveal = SequenceTiming.builder()
 - **`build(playbackOptions?)`** takes the same options as a sequence's `build`.
 - Builders are immutable here too.
 
-To play it, give `sequence()` the timing and a **mapping** of the same shape, keyed by entry name. Each node takes `target` and `values`, and a nested sequence timing takes a nested mapping:
+To play it, give an animator's `animate()` the timing and a **mapping** of the same shape, keyed by entry name. Each animation entry takes `[target, values]`, and a nested sequence timing takes a nested mapping:
 
 ```ts
-sequence(reveal, {
-    title: {target: 'h1', values: {opacity: [0, 1], translate: [-40, 0]}},
-    subtitle: {target: 'h2', values: {opacity: [0, 1]}},
-    cta: {target: '#cta', values: {scale: [0.8, 1]}}
-}).play();
+animator().animate(reveal, {
+    title: ['h1', {opacity: [0, 1], translate: [-40, 0]}],
+    subtitle: ['h2', {opacity: [0, 1]}],
+    cta: ['#cta', {scale: [0.8, 1]}]
+});
 ```
 
-The mapping has to name every entry, and the types check it. What you get back is a `SequenceDefinition`, the same as from `build()`, so you can play it or add it to another sequence.
+The mapping has to name every entry, and the types check it. `sequence(reveal, mapping)` takes the same and gives you a `SequenceDefinition`, the same as from `build()`, so you can keep it, play it, or add it to another sequence.
 
 <br/><br/>
 
 ## Controls
 
 ```ts
-const controls = definition.play({scope});
+const controls = animator({scope}).animate(definition);
 ```
 
-- `play()` looks up the targets and reads the current values at that moment, and starts playing right away. To start paused, call `pause()` right after it; nothing moves in between.
-- `scope` is where selectors and target functions look for elements. It defaults to `document.documentElement`.
-- Each `play()` starts a fresh set of animations with their own controls.
+- `animator()` gives you an animator. Its `scope` is where selectors and target functions look for elements, and it defaults to `document.documentElement`.
+- An animator's `animate()` takes any of these:
+
+| Call | Plays |
+|---|---|
+| `animate(definition)` | An `AnimationDefinition` or a `SequenceDefinition`. |
+| `animate(target, values, timing)` | The animation `animation(target, values, timing)` defines. |
+| `animate(sequenceTiming, mapping)` | The sequence `sequence(sequenceTiming, mapping)` defines. |
+
+- `animate()` looks up the targets and reads the current values at that moment, and starts playing right away. To start paused, call `pause()` right after it; nothing moves in between.
+- Each `animate()` starts a fresh set of animations with their own controls.
 
 | Control | What it does |
 |---|---|
@@ -502,12 +501,12 @@ const controls = definition.play({scope});
 animate('.card', {opacity: [0, 1]}, {type: 'spring', duration: 0.6, bounce: 0.2, delay: stagger(0.1)});
 
 // timesfps
-animation('.card', {opacity: [0, 1]}, {duration: 0.6, bounce: 0.2, delay: stagger(0.1)}).play();
+animator().animate('.card', {opacity: [0, 1]}, {duration: 0.6, bounce: 0.2, delay: stagger(0.1)});
 ```
 
 | Motion | timesfps |
 |---|---|
-| `animate(target, keyframes, options)` | `animation(target, values, timing).play()` |
+| `animate(target, keyframes, options)` | `animator().animate(target, values, timing)` |
 | `ease` | `easing`, with the same preset names and cubic Bézier arrays |
 | `type: 'spring'` with `stiffness`, `damping`, `mass` | `{stiffness, damping, mass}` |
 | `type: 'spring'` with `duration`, `bounce` | `{duration, bounce}`, with `bounce` required |
@@ -517,10 +516,10 @@ animation('.card', {opacity: [0, 1]}, {duration: 0.6, bounce: 0.2, delay: stagge
 | `stagger(0.1, {startDelay, from, ease})` | `stagger(0.1, {startDelay, from, easing})` |
 | `[null, 100]` | `[null, 100]` |
 | `x`, `y`, `scale`, `rotate` | CSS's individual properties: `translate`, `scale`, `rotate` |
-| `animate([[target, keyframes, {at}], …])` | `sequence().add(target, values, timing, {at}) … .build().play()` |
+| `animate([[target, keyframes, {at}], …])` | `sequence().add(target, values, timing, {at}) … .build()`, then `animate()` it |
 | `at: '<'`, `'+0.5'`, `'-0.2'` | the same |
 | Labels | entry names: `{name: 'title'}`, then `'title<'` or `'title>'` |
-| `useAnimate`'s scope | `play({scope})` |
+| `useAnimate`'s scope | `animator({scope})` |
 | `time`, `speed` | `seek(time)`, `playbackRate` |
 | `complete()`, `then()` | `finish()`, `finished` |
 
@@ -528,7 +527,6 @@ Things that work differently:
 
 - **One easing across all values.** Motion eases each segment between keyframes on its own. Here, the easing runs once from 0 to 1, and the values change linearly with progress between their keys. Motion's `times` are fractions of the time; keys here are progress.
 - **Timing is always given.** Motion picks a default transition per property. Here, every animation states its own.
-- **Definitions play when you call `play()`.** Motion's `animate` starts right away.
 - **Springs.**
     - The same `visualDuration` swings 1.2 times faster here, so pass 1.2 × Motion's.
     - `bounce` keeps having an effect up to ±1. Motion stops at ±0.95.
@@ -544,14 +542,14 @@ Things that work differently:
 gsap.from('.card', {opacity: 0, y: 20, duration: 0.4, ease: 'power2.out', stagger: 0.1});
 
 // timesfps
-animation('.card', {opacity: [0, null], '--y': ['20px', null]}, {
+animator().animate('.card', {opacity: [0, null], '--y': ['20px', null]}, {
     duration: 0.4, easing: 'easeOut', delay: stagger(0.1)
-}).play();
+});
 ```
 
 | GSAP | timesfps |
 |---|---|
-| `gsap.to(target, {opacity: 1})` | `animation(target, {opacity: 1}, timing)` |
+| `gsap.to(target, {opacity: 1})` | `animator().animate(target, {opacity: 1}, timing)` |
 | `gsap.from(target, {opacity: 0})` | `{opacity: [0, null]}` or `{opacity: {0: 0}}` |
 | `gsap.fromTo(target, {opacity: 0}, {opacity: 1})` | `{opacity: [0, 1]}` |
 | `gsap.set(target, vars)` | `{duration: 0}` |
@@ -587,7 +585,7 @@ animation('.card', {opacity: [0, null], '--y': ['20px', null]}, {
 element.animate({opacity: [0, 1]}, {duration: 400, easing: 'ease-out', iterations: 3, direction: 'alternate', fill: 'forwards'});
 
 // timesfps
-animation(element, {opacity: [0, 1]}, {duration: 0.4, easing: 'easeOut', repeat: 2, repeatMode: 'reverse'}).play();
+animator().animate(element, {opacity: [0, 1]}, {duration: 0.4, easing: 'easeOut', repeat: 2, repeatMode: 'reverse'});
 ```
 
 | WAAPI | timesfps |
