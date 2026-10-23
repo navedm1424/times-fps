@@ -1,10 +1,15 @@
-import type {PropertyStops, StopValue} from "../resolution/stops.ts";
+import type {CSSValue} from "../dom/mapping.ts";
+import {NumericStops} from "../resolution/stops.ts";
+import type {EntryPath} from "../sequence-timing.ts";
+import type {TweenStops} from "../tween-stops.ts";
 import type {Seconds} from "../types.ts";
 import {landsOnStops} from "./native-effects.ts";
 import type {PlacedEffect, ResolvedEffect} from "./tracks.ts";
 
 /** What resolving values needs from the page. */
 export interface CSSValueResolver {
+    /** The value as CSS text; a bare number takes the property's default unit. */
+    textOf(property: string, value: CSSValue): string;
     /** The property's value on the element as it is now. */
     currentValueOf(element: Element, property: string): string;
     /** Whether the property takes the value. */
@@ -15,6 +20,7 @@ export interface CSSValueResolver {
 
 /** Takes values as plain numbers without a unit, for tracks that stand in for no property of an element. */
 export const plainNumberResolver: CSSValueResolver = {
+    textOf: (_property, value) => String(value),
     currentValueOf: (_element, property) => {
         throw new Error(`"${property}" has no current value off the page, so it needs a value at 0.`);
     },
@@ -22,14 +28,48 @@ export const plainNumberResolver: CSSValueResolver = {
     resolve: (_element, _property, text) => text
 };
 
+/** An entry's values on one track: their CSS text, and their numbers in one unit once the entry's chain is resolved to one. */
+export class EntryValues {
+    constructor(
+        private readonly textOfValue: (value: CSSValue) => string,
+        /** The value underneath as the entry starts: its text, or only its number when the track is between stops then. */
+        private readonly underneath: { text: string | undefined; number: number | undefined },
+        private readonly numbersByText: ReadonlyMap<string, number> | undefined
+    ) {}
+
+    /** A `null` value is the value underneath as the entry starts. */
+    textOf(value: CSSValue | null): string {
+        const text = value === null ? this.underneath.text : this.textOfValue(value);
+        if (text === undefined) throw new Error("The value underneath has no text, only a number.");
+        return text;
+    }
+
+    numberOf(value: CSSValue | null): number {
+        const number = value === null && this.underneath.number !== undefined ? this.underneath.number : this.numbersByText?.get(this.textOf(value));
+        if (number === undefined) throw new Error(`The value "${this.textOf(value)}" hasn't been resolved to a number.`);
+        return number;
+    }
+
+    numericStopsOf(stops: TweenStops): NumericStops {
+        return new NumericStops(stops.stops.map(({offset, value}) => ({offset, value: this.numberOf(value)})));
+    }
+}
+
 /** An entry's effects on one track, which share its stops. */
 interface EntryEffects {
-    stops: PropertyStops;
+    path: EntryPath | undefined;
+    stops: TweenStops;
     effects: PlacedEffect[];
     /** When its first effect starts. */
     start: Seconds;
     /** Where its first effect is declared on the track. */
     declaredIndex: number;
+}
+
+/** A chain's values as numbers in one unit, by their text. */
+interface ChainNumbers {
+    unit: string;
+    numbersByText: ReadonlyMap<string, number>;
 }
 
 /**
@@ -39,13 +79,14 @@ interface EntryEffects {
  * Values pass through when every keyframe of their effect lands on a stop with text; a chain with any other effect is resolved to numbers in one unit.
  */
 export function resolveEffectChains(element: Element, property: string, effects: readonly PlacedEffect[], resolver: CSSValueResolver): ResolvedEffect[] {
+    const textOfValue = (value: CSSValue) => resolver.textOf(property, value);
     const entries = entryEffectsOf(effects);
     const declaredIndices = new Map(effects.map((effect, index) => [effect, index]));
     const chains = new Map<EntryEffects, EntryEffects[]>();
     const predecessors = new Map<EntryEffects, PlacedEffect>();
     const ordered = [...entries].sort((first, second) => first.start - second.start || first.declaredIndex - second.declaredIndex);
     ordered.forEach((entry, index) => {
-        const predecessor = entry.stops.startValue.given
+        const predecessor = entry.stops.startValue !== null
             ? undefined
             : shownEffectAt(entry.start, ordered.slice(0, index), declaredIndices);
         if (!predecessor) {
@@ -58,46 +99,63 @@ export function resolveEffectChains(element: Element, property: string, effects:
         predecessors.set(entry, predecessor);
     });
 
+    const underneathTexts = new Map<EntryEffects, string>();
     const startsBetweenStops = new Set<EntryEffects>();
+    const textShownAt = (effect: PlacedEffect, time: Seconds): string | undefined => {
+        const value = stopValueShownAt(effect, time);
+        if (value === undefined) return undefined;
+        return value === null ? underneathTexts.get(entryOf(effect, entries)) : textOfValue(value);
+    };
     for (const entry of ordered) {
-        const start = entry.stops.startValue;
-        if (start.given) continue;
+        if (entry.stops.startValue !== null) continue;
         const predecessor = predecessors.get(entry);
-        const startText = predecessor ? stopValueShownAt(predecessor, entry.start)?.text : resolver.currentValueOf(element, property);
+        const startText = predecessor ? textShownAt(predecessor, entry.start) : resolver.currentValueOf(element, property);
         if (startText === undefined) startsBetweenStops.add(entry);
-        else start.adoptText(startText);
+        else underneathTexts.set(entry, startText);
     }
 
+    const givenTextsOf = ({stops}: EntryEffects) => stops.stops.flatMap(({value}) => value === null ? [] : [textOfValue(value)]);
     const passing = new Set(effects.filter(effect => landsOnStops(effect) && !startsBetweenStops.has(entryOf(effect, entries))));
-    const units = new Map<EntryEffects[], string>();
+    const numbersByChain = new Map<EntryEffects[], ChainNumbers>();
     for (const chain of new Set(chains.values())) {
-        if (chain.every(({effects}) => effects.every(effect => passing.has(effect))))
-            checkGivenValues(property, chain, resolver);
-        else
-            units.set(chain, resolveChainValues(element, property, chain, resolver));
-    }
-    for (const entry of ordered) {
-        if (startsBetweenStops.has(entry)) entry.stops.startValue.assignNumber(valueShownAt(predecessors.get(entry)!, entry.start)!);
+        if (chain.every(({effects}) => effects.every(effect => passing.has(effect)))) {
+            checkGivenValues(property, chain.flatMap(givenTextsOf), resolver);
+            continue;
+        }
+        const texts = chain.flatMap(entry => [...givenTextsOf(entry), ...(underneathTexts.has(entry) ? [underneathTexts.get(entry)!] : [])]);
+        numbersByChain.set(chain, resolveChainValues(element, property, underneathTexts.get(chain[0]!), texts, resolver));
     }
 
-    return effects.map(effect => ({...effect, unit: passing.has(effect) ? undefined : units.get(chains.get(entryOf(effect, entries))!)!}));
+    const valuesByEntry = new Map<EntryEffects, EntryValues>();
+    for (const entry of ordered) {
+        const underneathNumber = startsBetweenStops.has(entry)
+            ? valueShownAt(predecessors.get(entry)!, entry.start, valuesByEntry.get(entryOf(predecessors.get(entry)!, entries))!)
+            : undefined;
+        const underneath = {text: underneathTexts.get(entry), number: underneathNumber};
+        valuesByEntry.set(entry, new EntryValues(textOfValue, underneath, numbersByChain.get(chains.get(entry)!)?.numbersByText));
+    }
+
+    return effects.map(effect => {
+        const entry = entryOf(effect, entries);
+        return {...effect, unit: passing.has(effect) ? undefined : numbersByChain.get(chains.get(entry)!)!.unit, values: valuesByEntry.get(entry)!};
+    });
 }
 
 function entryEffectsOf(effects: readonly PlacedEffect[]): EntryEffects[] {
-    const entries = new Map<PropertyStops, EntryEffects>();
+    const entries = new Map<EntryPath | undefined, EntryEffects>();
     effects.forEach((effect, index) => {
-        const entry = entries.get(effect.entryStops);
+        const entry = entries.get(effect.path);
         if (entry) {
             entry.effects.push(effect);
             entry.start = Math.min(entry.start, effect.delay);
         } else
-            entries.set(effect.entryStops, {stops: effect.entryStops, effects: [effect], start: effect.delay, declaredIndex: index});
+            entries.set(effect.path, {path: effect.path, stops: effect.entryStops, effects: [effect], start: effect.delay, declaredIndex: index});
     });
     return [...entries.values()];
 }
 
 function entryOf(effect: PlacedEffect, entries: readonly EntryEffects[]): EntryEffects {
-    return entries.find(entry => entry.stops === effect.entryStops)!;
+    return entries.find(entry => entry.path === effect.path)!;
 }
 
 /** The effect declared last among the entries' effects that show a value at `time`. */
@@ -109,23 +167,21 @@ function shownEffectAt(time: Seconds, entries: readonly EntryEffects[], declared
         .at(-1);
 }
 
-function valueShownAt(effect: PlacedEffect, time: Seconds): number | undefined {
+function valueShownAt(effect: PlacedEffect, time: Seconds, values: EntryValues): number | undefined {
     const iterationTime = iterationTimeAt(effect, time);
-    return iterationTime === undefined ? undefined : effect.run.valueAt(iterationTime);
+    return iterationTime === undefined ? undefined : effect.run.valueAt(iterationTime, stops => values.numericStopsOf(stops));
 }
 
-function stopValueShownAt(effect: PlacedEffect, time: Seconds): StopValue | undefined {
+function stopValueShownAt(effect: PlacedEffect, time: Seconds): CSSValue | null | undefined {
     const iterationTime = iterationTimeAt(effect, time);
     return iterationTime === undefined ? undefined : effect.run.stopValueAt(iterationTime);
 }
 
 /** Throws for a given value the property doesn't take, without resolving it. */
-function checkGivenValues(property: string, chain: readonly EntryEffects[], resolver: CSSValueResolver): void {
-    for (const {stops} of chain) {
-        for (const value of stops.values) {
-            if (value.given && !resolver.accepts(property, value.text!))
-                throw new TypeError(`"${value.text}" isn't a value "${property}" takes.`);
-        }
+function checkGivenValues(property: string, givenTexts: readonly string[], resolver: CSSValueResolver): void {
+    for (const text of givenTexts) {
+        if (!resolver.accepts(property, text))
+            throw new TypeError(`"${text}" isn't a value "${property}" takes.`);
     }
 }
 
@@ -152,13 +208,11 @@ function iterationTimeAt({delay, duration, iterations, direction, fill}: PlacedE
 }
 
 /**
- * Resolves the values of the chain that have text to numbers in one unit, and gives that unit.
- * Without a value at 0, the chain starts from the property's current value, whose unit the rest must resolve to.
+ * Resolves the texts of the chain's values to numbers in one unit.
+ * When its first entry has no value at 0, the chain starts from the property's current value, whose unit the rest must resolve to.
  * Otherwise values that are all numbers in one unit are taken as they are; failing that, the expressions are resolved, and failing that, every value is.
  */
-function resolveChainValues(element: Element, property: string, chain: readonly EntryEffects[], resolver: CSSValueResolver): string {
-    const [first] = chain;
-    const values = chain.flatMap(({stops}) => stops.values).filter(value => value.text !== undefined);
+function resolveChainValues(element: Element, property: string, currentText: string | undefined, texts: readonly string[], resolver: CSSValueResolver): ChainNumbers {
     const resolvedNumericOf = (text: string): Numeric => {
         if (!resolver.accepts(property, text))
             throw new TypeError(`"${text}" isn't a value "${property}" takes.`);
@@ -167,40 +221,38 @@ function resolveChainValues(element: Element, property: string, chain: readonly 
         if (!numeric) throw new TypeError(`"${text}" resolves to "${resolved}" for "${property}", which isn't a single number with a unit.`);
         return numeric;
     };
+    const chainNumbersOf = (unit: string, numerics: readonly Numeric[]): ChainNumbers =>
+        ({unit, numbersByText: new Map(texts.map((text, index) => [text, numerics[index]!.value]))});
 
-    if (!first!.stops.startValue.given) {
-        const current = first!.stops.startValue.text!;
-        const currentNumeric = parseNumeric(current);
+    if (currentText !== undefined) {
+        const currentNumeric = parseNumeric(currentText);
         if (!currentNumeric)
-            throw new Error(`"${property}" is "${current}" now, which isn't a single number with a unit, so it needs a value at 0.`);
-        for (const value of values) {
-            const given = parseNumeric(value.text!);
-            const numeric = given?.unit === currentNumeric.unit ? given : resolvedNumericOf(value.text!);
+            throw new Error(`"${property}" is "${currentText}" now, which isn't a single number with a unit, so it needs a value at 0.`);
+        return chainNumbersOf(currentNumeric.unit, texts.map(text => {
+            const given = parseNumeric(text);
+            const numeric = given?.unit === currentNumeric.unit ? given : resolvedNumericOf(text);
             if (numeric.unit !== currentNumeric.unit)
-                throw new Error(`"${value.text}" resolves to a value in "${numeric.unit}" for "${property}", whose current value is in "${currentNumeric.unit}". ${sameUnitAdvice}`);
-            value.assignNumber(numeric.value);
-        }
-        return currentNumeric.unit;
+                throw new Error(`"${text}" resolves to a value in "${numeric.unit}" for "${property}", whose current value is in "${currentNumeric.unit}". ${sameUnitAdvice}`);
+            return numeric;
+        }));
     }
 
-    const given = values.map(value => parseNumeric(value.text!));
+    const given = texts.map(parseNumeric);
     const givenUnits = new Set(given.map(numeric => numeric?.unit));
     if (givenUnits.size === 1 && !givenUnits.has(undefined)) {
         const unit = given[0]!.unit;
         if (!resolver.accepts(property, `1${unit}`))
             throw new TypeError(`"${property}" doesn't take values in "${unit}".`);
-        values.forEach((value, index) => value.assignNumber(given[index]!.value));
-        return unit;
+        return chainNumbersOf(unit, given as Numeric[]);
     }
 
-    let numerics = values.map((value, index) => given[index] ?? resolvedNumericOf(value.text!));
+    let numerics = texts.map((text, index) => given[index] ?? resolvedNumericOf(text));
     if (new Set(numerics.map(({unit}) => unit)).size > 1)
-        numerics = values.map((value, index) => given[index] ? resolvedNumericOf(value.text!) : numerics[index]!);
+        numerics = texts.map((text, index) => given[index] ? resolvedNumericOf(text) : numerics[index]!);
     const units = new Set(numerics.map(({unit}) => unit));
     if (units.size > 1)
         throw new Error(`The values of "${property}" resolve to different units: ${[...units].map(unit => `"${unit}"`).join(', ')}. ${sameUnitAdvice}`);
-    values.forEach((value, index) => value.assignNumber(numerics[index]!.value));
-    return numerics[0]!.unit;
+    return chainNumbersOf(numerics[0]!.unit, numerics);
 }
 
 const sameUnitAdvice = "Use values in one unit, or expressions that resolve to one. "

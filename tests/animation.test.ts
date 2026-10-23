@@ -1,5 +1,5 @@
 import {describe, expect, it} from "vitest";
-import {AnimationTiming} from "../src/animation.ts";
+import {AnimationTiming} from "../src/animation-timing.ts";
 import {DampedSpring} from "../src/damped-spring.ts";
 import {PRECISION} from "../src/constants.ts";
 import {stagger} from "../src/stagger.ts";

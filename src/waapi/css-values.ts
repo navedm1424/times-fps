@@ -1,8 +1,6 @@
-import {PropertyStops} from "../resolution/stops.ts";
 import {checkNumber} from "../utils/validation.ts";
 import type {CSSValueResolver} from "./effect-chains.ts";
-import {type AnimationValues, type CSSValue, progressStopsOf} from "../dom/mapping.ts";
-import type {ElementValues} from "./tracks.ts";
+import type {CSSValue} from "../dom/mapping.ts";
 
 /** The CSS name of a property given in camelCase; a custom property is already given by it. */
 export function cssPropertyNameOf(property: string): string {
@@ -20,32 +18,19 @@ export function keyframePropertyOf(property: string): string {
     return property;
 }
 
-/** Each element's stops, as CSS text; a bare number takes the property's default unit. */
-export function resolveElementValues(
-    elements: readonly Element[],
-    values: AnimationValues
-): ElementValues[] {
-    const textStops = Object.entries(values).map(([property, valueStops]) => {
-        const type = PropertyValueType.of(cssPropertyNameOf(property));
-        const texts = progressStopsOf(property, valueStops).map(([progress, value]) => [progress, cssTextOf(property, value, type)]);
-        return [property, Object.fromEntries(texts)] as const;
-    });
-    return elements.map(element => ({
-        element,
-        properties: Object.fromEntries(textStops.map(([property, texts]) => [property, PropertyStops.of(property, texts)]))
-    }));
-}
-
 /** Resolves values on the page: its current values are computed styles, and its expressions resolve through probes. */
 export const domValueResolver: CSSValueResolver = {
+    textOf: cssTextOf,
     currentValueOf: (element, property) => getComputedStyle(element).getPropertyValue(cssPropertyNameOf(property)).trim(),
     accepts: (property, text) => CSS.supports(cssPropertyNameOf(property), text),
     resolve: (element, property, text) => PropertyValueType.of(cssPropertyNameOf(property)).resolve(element, text)
 };
 
-function cssTextOf(property: string, value: CSSValue, type: PropertyValueType): string {
+/** A bare number takes the property's default unit. */
+function cssTextOf(property: string, value: CSSValue): string {
     if (typeof value === 'string') return value;
     checkNumber(value, `A value of "${property}"`);
+    const type = PropertyValueType.of(cssPropertyNameOf(property));
     if (type.defaultUnit === undefined)
         throw new TypeError(`"${property}" doesn't take a bare number, so ${value} needs a unit.`);
     return `${value}${type.defaultUnit}`;

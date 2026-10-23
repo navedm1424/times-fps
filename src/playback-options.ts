@@ -1,8 +1,12 @@
+import type {StaggerOrigin} from "./stagger.ts";
 import type {Seconds} from "./types.ts";
 import {checkNumber} from "./utils/validation.ts";
 
-/** The delay of each element, from its index among total; what delay takes, and what stagger() makes. */
-export type Stagger = (index: number, total: number) => Seconds;
+/** The delay of each element, from its index among total; what delay takes, and what stagger() makes, which also keeps its origin. */
+export interface Stagger {
+    (index: number, total: number): Seconds;
+    readonly from?: StaggerOrigin;
+}
 export type RepeatMode = 'loop' | 'reverse' | 'mirror';
 
 export interface RepeatOptions {
@@ -11,17 +15,14 @@ export interface RepeatOptions {
     repeatMode?: RepeatMode;
 }
 
-/** The delays a stagger gives a number of elements, in order. */
-export type StaggeredDelays = (count: number) => Seconds[];
-
 /** The options of a timing: a delay before the first play, and how it repeats. */
 export interface PlaybackOptions extends RepeatOptions {
     delay?: Seconds | Stagger;
 }
 
-/** The options as a timing keeps them: clamped, with a stagger wrapped as `StaggeredDelays`. */
+/** The options as a timing keeps them: clamped, with a stagger checked by `checkedStaggerOf`. */
 export interface PlaybackDescriptor extends RepeatOptions {
-    delay?: Seconds | StaggeredDelays;
+    delay?: Seconds | Stagger;
 }
 
 const repeatModes: readonly RepeatMode[] = ['loop', 'reverse', 'mirror'];
@@ -50,15 +51,14 @@ export function clampedDelay<Options extends { delay?: Seconds | Stagger }>(opti
     return typeof options.delay === 'number' ? {...options, delay: Math.max(0, options.delay)} : options;
 }
 
-/** Wraps a stagger so it gives every element's delay at once; NaN and infinite delays throw, and negative ones become 0. */
-export function staggeredDelaysOf(stagger: Stagger): StaggeredDelays {
-    return count => Array.from({length: count}, (_, index) =>
-        Math.max(0, checkNumber(stagger(index, count), `The staggered delay of element ${index}`))
-    );
+/** Wraps a stagger so NaN and infinite delays throw, and negative ones become 0; it keeps the stagger's origin. */
+export function checkedStaggerOf(stagger: Stagger): Stagger {
+    const checked = (index: number, total: number) => Math.max(0, checkNumber(stagger(index, total), `The staggered delay of element ${index}`));
+    return stagger.from === undefined ? checked : Object.assign(checked, {from: stagger.from});
 }
 
-/** The options clamped, with a staggered delay wrapped so it gives every element's delay at once. */
+/** The options clamped, with a staggered delay checked. */
 export function playbackDescriptorOf(options: PlaybackOptions): PlaybackDescriptor {
     const {delay, ...clampedOptions} = clampedDelay(clampedRepeats(options));
-    return {...clampedOptions, ...(delay !== undefined && {delay: typeof delay === 'number' ? delay : staggeredDelaysOf(delay)})};
+    return {...clampedOptions, ...(delay !== undefined && {delay: typeof delay === 'number' ? delay : checkedStaggerOf(delay)})};
 }

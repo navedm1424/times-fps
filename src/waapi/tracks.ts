@@ -1,17 +1,11 @@
-import type {PropertyStops} from "../resolution/stops.ts";
-import {type AnimationLayout, type LayoutNode, type SequenceLayout} from "../resolution/layout.ts";
-import {entryPathOf, type EntryPath} from "../sequence.ts";
+import type {AnimationPlan, PlanNode, SequencePlan} from "../resolution/plan.ts";
+import {entryPathOf, type EntryPath} from "../sequence-timing.ts";
 import {TrackRun} from "../resolution/track-runs.ts";
+import type {TweenStops} from "../tween-stops.ts";
 import type {Seconds} from "../types.ts";
-import {type CSSValueResolver, resolveEffectChains} from "./effect-chains.ts";
+import {type CSSValueResolver, type EntryValues, resolveEffectChains} from "./effect-chains.ts";
 import {type NativeAnimationEffect, nativeEffectOf} from "./native-effects.ts";
 import type {RepeatOptions} from "../playback-options.ts";
-
-/** An element of an animation, with each property's stops. */
-export interface ElementValues {
-    element: Element;
-    properties: { [property: string]: PropertyStops };
-}
 
 /** Each element's properties, each with its effects in the order they're declared, which is the order they show over each other in. */
 export type AnimationTracks = Map<Element, { [property: string]: NativeAnimationEffect[] }>;
@@ -23,7 +17,7 @@ interface TrackKey {
     /** The animation leaf it comes from, which is undefined for an animation on its own. */
     path: EntryPath | undefined;
     /** The stops its entry gives the property, before any repeat flips them. */
-    entryStops: PropertyStops;
+    entryStops: TweenStops;
     order: readonly number[];
 }
 
@@ -49,6 +43,7 @@ export interface PlacedEffect extends ScheduledEffect {
 /** An effect whose values are numbers in `unit`, or pass through to WAAPI as CSS text when it has none. */
 export interface ResolvedEffect extends PlacedEffect {
     unit: string | undefined;
+    values: EntryValues;
 }
 
 /** What an entry puts on the tracks, in the time of the iteration of the sequence it's in. */
@@ -60,14 +55,12 @@ interface Contribution {
 type EffectTiming = Pick<ScheduledEffect, 'delay' | 'duration' | 'iterations' | 'direction' | 'run'>;
 
 /**
- * Resolves the layout into tracks in four stages: the repetitions, the fill conflicts, the values, then the easings.
+ * Resolves the plan into tracks in four stages: the repetitions, the fill conflicts, the values, then the easings.
  * Only the outermost repeat runs as WAAPI iterations; the ones inside it are baked into the keyframes, except that an infinite one only gives its first iteration, and an effect continuing it from there.
  */
 export class AnimationTracksResolver {
-    private constructor(private readonly valuesOf: (path: EntryPath) => readonly ElementValues[]) {}
-
-    static resolve(layout: LayoutNode, valuesOf: (path: EntryPath) => readonly ElementValues[], valueResolver: CSSValueResolver): AnimationTracks {
-        const {effects} = new AnimationTracksResolver(valuesOf).scheduleRepetitions(layout, undefined, [], false);
+    static resolve(plan: PlanNode, valueResolver: CSSValueResolver): AnimationTracks {
+        const {effects} = AnimationTracksResolver.scheduleRepetitions(plan, undefined, [], false);
 
         const effectsByTrack = new Map<Element, Map<string, ScheduledEffect[]>>();
         for (const effect of effects) {
@@ -87,47 +80,37 @@ export class AnimationTracksResolver {
         )]));
     }
 
-    private scheduleRepetitions(layout: LayoutNode, path: EntryPath | undefined, order: readonly number[], repeatingAncestor: boolean): Contribution {
-        switch (layout.type) {
+    private static scheduleRepetitions(plan: PlanNode, path: EntryPath | undefined, order: readonly number[], repeatingAncestor: boolean): Contribution {
+        switch (plan.type) {
             case 'animation':
-                return this.resolveAnimationRepetitions(layout, path, order, repeatingAncestor);
+                return AnimationTracksResolver.resolveAnimationRepetitions(plan, path, order, repeatingAncestor);
             case 'sequence':
-                return this.resolveSequenceRepetitions(layout, path, order, repeatingAncestor);
-            case 'staggered-sequence': {
-                const lanes = layout.lanes.map(lane => this.resolveSequenceRepetitions(lane, path, order, repeatingAncestor));
-                return {runs: lanes.flatMap(({runs}) => runs), effects: lanes.flatMap(({effects}) => effects)};
-            }
+                return AnimationTracksResolver.resolveSequenceRepetitions(plan, path, order, repeatingAncestor);
         }
     }
 
-    private resolveAnimationRepetitions(layout: AnimationLayout, path: EntryPath | undefined, order: readonly number[], repeatingAncestor: boolean): Contribution {
-        const contribution: Contribution = {runs: [], effects: []};
-        const {timing, easing, playDuration} = layout;
-        const values = this.valuesOf(path ?? '');
-        for (const {index, start} of layout.elements) {
-            const {element, properties} = values[index]!;
-            const runs = Object.entries(properties).map(([property, stops]): KeyedRun =>
-                ({element, property, path, entryStops: stops, order, run: TrackRun.play(playDuration, easing, stops)})
-            );
-            const repeated = AnimationTracksResolver.repeated({runs, effects: []}, playDuration, timing.playback, repeatingAncestor, order.length);
-            const placed = AnimationTracksResolver.shifted(repeated, start);
-            contribution.runs.push(...placed.runs);
-            contribution.effects.push(...placed.effects);
-        }
-        return contribution;
+    private static resolveAnimationRepetitions(plan: AnimationPlan, path: EntryPath | undefined, order: readonly number[], repeatingAncestor: boolean): Contribution {
+        const {definition, easing, playDuration} = plan;
+        const runs = plan.targets.flatMap(({element}) => Object.entries(definition.stopsByProperty).map(([property, stops]): KeyedRun =>
+            ({element, property, path, entryStops: stops, order, run: TrackRun.play(playDuration, easing, stops)})
+        ));
+        const repeated = AnimationTracksResolver.repeated({runs, effects: []}, playDuration, definition.timing.playback, repeatingAncestor, order.length);
+        const delays = new Map(plan.targets.map(({element, delay}) => [element, delay]));
+        return AnimationTracksResolver.shifted(repeated, ({element}) => plan.position + delays.get(element)!);
     }
 
-    private resolveSequenceRepetitions(layout: SequenceLayout, path: EntryPath | undefined, order: readonly number[], repeatingAncestor: boolean): Contribution {
-        const {playback} = layout.sequence;
+    private static resolveSequenceRepetitions(plan: SequencePlan, path: EntryPath | undefined, order: readonly number[], repeatingAncestor: boolean): Contribution {
+        const {playback} = plan.definition.timing;
         const repeats = (playback.repeat ?? 0) > 0;
         const children: Contribution = {runs: [], effects: []};
-        [...layout.entries].forEach(([name, entryLayout], index) => {
-            const child = this.scheduleRepetitions(entryLayout, entryPathOf(path, name), [...order, index], repeatingAncestor || repeats);
-            children.runs.push(...child.runs);
-            children.effects.push(...child.effects);
+        [...plan.entries].forEach(([name, entryPlan], index) => {
+            const child = AnimationTracksResolver.scheduleRepetitions(entryPlan, entryPathOf(path, name), [...order, index], repeatingAncestor || repeats);
+            const repeated = AnimationTracksResolver.repeated(child, plan.playDuration, playback, repeatingAncestor, order.length);
+            const copyDelayed = AnimationTracksResolver.shifted(repeated, copyDelayOf(entryPlan));
+            children.runs.push(...copyDelayed.runs);
+            children.effects.push(...copyDelayed.effects);
         });
-        const repeated = AnimationTracksResolver.repeated(children, layout.playDuration, playback, repeatingAncestor, order.length);
-        return AnimationTracksResolver.shifted(repeated, layout.firstStart);
+        return AnimationTracksResolver.shifted(children, () => plan.position);
     }
 
     /**
@@ -155,10 +138,11 @@ export class AnimationTracksResolver {
         return {runs: runs.map(keyed => ({...keyed, run: baked(keyed.run, iterationDuration, options)})), effects};
     }
 
-    private static shifted({runs, effects}: Contribution, by: Seconds): Contribution {
+    /** Moves each run and effect later by `startOf` its track. */
+    private static shifted({runs, effects}: Contribution, startOf: (key: TrackKey) => Seconds): Contribution {
         return {
-            runs: runs.map(keyed => ({...keyed, run: keyed.run.shifted(by)})),
-            effects: effects.map(effect => ({...effect, delay: effect.delay + by}))
+            runs: runs.map(keyed => ({...keyed, run: keyed.run.shifted(startOf(keyed))})),
+            effects: effects.map(effect => ({...effect, delay: effect.delay + startOf(effect)}))
         };
     }
 
@@ -180,6 +164,13 @@ export class AnimationTracksResolver {
             return {...effect, fill};
         });
     }
+}
+
+/** What its sequence delays each copy of the entry by, after the sequence's repeats: each element of an animation, or a subsequence as a whole. */
+function copyDelayOf(plan: PlanNode): (key: TrackKey) => Seconds {
+    if (plan.type === 'sequence') return () => plan.sequenceDelay;
+    const sequenceDelays = new Map(plan.targets.map(({element, sequenceDelay}) => [element, sequenceDelay]));
+    return ({element}) => sequenceDelays.get(element)!;
 }
 
 /** Earlier entries come first, and an entry's own parts in their order. */

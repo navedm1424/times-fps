@@ -34,7 +34,7 @@ export function stagger(stepOrOptions: Seconds | (StaggerSpacing & StaggerOption
         if (farthestDistance === 0) return 0;
         return spacingEasing.progressAt(Math.abs(index - origin) / farthestDistance) * (spread ?? farthestDistance * step!);
     };
-    return (index, total) => startDelay + spreadDelay(index, total);
+    return Object.assign((index: number, total: number) => startDelay + spreadDelay(index, total), {from});
 }
 
 function originIndex(from: StaggerOrigin, total: number): number {

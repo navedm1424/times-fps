@@ -1,11 +1,10 @@
-import {AnimationTiming, type SpringTransitionOptions} from "timesfps";
+import {animation, type SpringTransitionOptions} from "timesfps";
 import {
     AnimationTracksResolver,
     CubicBezierEasing,
-    layoutOf,
     type NativeKeyframe,
     plainNumberResolver,
-    PropertyStops,
+    planOf,
     SpringSplineFitter
 } from "timesfps/internals";
 import {springEasingOf} from "./spring-parameters";
@@ -71,13 +70,13 @@ export function fitSpring(transition: SpringTransitionOptions): SpringFit {
     };
 }
 
-/** The resolver only keys its tracks by element, so a plain object stands in for one, which the server doesn't have. */
+/** The plan only takes it as the target, and the resolver keys its tracks by it, so a plain object stands in for an element, which the server doesn't have. */
 const standInElement = {} as Element;
 
 /** The keyframes the WAAPI adapter plays the spring as, from 0 to 1. */
 function keyframesOf(transition: SpringTransitionOptions): readonly NativeKeyframe[] {
-    const elementValues = [{element: standInElement, properties: {progress: PropertyStops.of("progress", {0: 0, 1: 1})}}];
-    const tracks = AnimationTracksResolver.resolve(layoutOf(AnimationTiming.of(transition), 1), () => elementValues, plainNumberResolver);
+    const definition = animation(standInElement, {progress: [0, 1]}, transition);
+    const tracks = AnimationTracksResolver.resolve(planOf(definition, standInElement), plainNumberResolver);
     const [effect, ...others] = tracks.get(standInElement)!.progress!;
     if (!effect || others.length > 0) throw new Error("A spring on its own should play as one effect.");
     return effect.keyframes;

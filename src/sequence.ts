@@ -1,116 +1,177 @@
-import {AnimationTiming, type AnimationTimingOptions} from "./animation.ts";
-import {type At, checkPositionDescriptor, parsePositionDescriptor, type PositionDescriptor} from "./at.ts";
-import {checkPlaybackOptions, type PlaybackDescriptor, playbackDescriptorOf, type PlaybackOptions} from "./playback-options.ts";
+import type {AnimationTiming, AnimationTimingOptions} from "./animation-timing.ts";
+import {AnimationDefinition} from "./animation.ts";
+import type {At} from "./at.ts";
+import type {AnimationMapping, AnimationValues, SequenceMapping, Target} from "./dom/mapping.ts";
+import type {PlaybackOptions} from "./playback-options.ts";
+import {
+    entryPathOf,
+    type EntryPath,
+    SequenceTiming,
+    type SequenceTimingBuilder,
+    type SequenceTimingEntries
+} from "./sequence-timing.ts";
 import {isProduction} from "./utils/environment.ts";
 
-export interface AnimationTimingEntry<Name extends string = string, Names extends string = string> {
+/** Where an entry goes in a sequence: the name later positions refer to it by, and when it starts. */
+export interface EntryPlacementOptions<N extends string, Names extends string> {
+    name?: N;
+    at?: At<Names>;
+}
+
+export type Definition = AnimationDefinition | SequenceDefinition;
+
+export interface AnimationDefinitionEntry<Name extends string = string> {
     name: Name;
-    animation: AnimationTiming;
-    position: PositionDescriptor<Names>;
+    animation: AnimationDefinition;
 }
-export interface SubsequenceTimingEntry<Name extends string = string, Subsequence extends SequenceTiming = SequenceTiming, Names extends string = string> {
+export interface SubsequenceDefinitionEntry<Name extends string = string> {
     name: Name;
-    sequence: Subsequence;
-    position: PositionDescriptor<Names>;
+    sequence: SequenceDefinition;
 }
 
-export type SequenceTimingEntry = AnimationTimingEntry | SubsequenceTimingEntry;
+export type SequenceDefinitionEntry = AnimationDefinitionEntry | SubsequenceDefinitionEntry;
 
-export type SequenceTimingEntries = readonly SequenceTimingEntry[];
+/** A sequence definition's entries, in the order of its timing's entries: an animation definition for each animation timing, and a sequence definition for each nested sequence timing. */
+export type SequenceDefinitionEntries = readonly SequenceDefinitionEntry[];
 
-type EntryNames<Entries extends SequenceTimingEntries> = Entries[number]['name'];
+const SEQUENCE_DEFINITION_CONSTRUCTION_LICENSE = Symbol("SequenceDefinitionConstructionLicense");
 
-/** An animation leaf's key in a sequence: the names of the entries leading to it, joined by `>`. */
-export type EntryPath = string;
-
-export function entryPathOf(parentPath: EntryPath | undefined, name: string): EntryPath {
-    return parentPath ? `${parentPath}>${name}` : name;
+function createSequenceDefinitionBuilder(): SequenceDefinitionBuilder {
+    return new (SequenceDefinitionBuilder as any)([], SEQUENCE_DEFINITION_CONSTRUCTION_LICENSE);
+}
+function createSequenceDefinition(entries: SequenceDefinitionEntries, timing: SequenceTiming): SequenceDefinition {
+    return new (SequenceDefinition as any)(entries, timing, SEQUENCE_DEFINITION_CONSTRUCTION_LICENSE);
 }
 
-const SEQUENCE_TIMING_CONSTRUCTION_LICENSE = Symbol("SequenceTimingConstructionLicense");
-
-function createSequenceTimingBuilder(): SequenceTimingBuilder {
-    return new (SequenceTimingBuilder as any)([], SEQUENCE_TIMING_CONSTRUCTION_LICENSE);
+/** A sequence built entry by entry, or a sequence timing given with its mapping. */
+export function sequence(): SequenceDefinitionBuilder;
+export function sequence<Timing extends SequenceTiming>(timing: Timing, mapping: SequenceMapping<Timing>): SequenceDefinition;
+export function sequence(timing?: SequenceTiming, mapping?: SequenceMapping): SequenceDefinitionBuilder | SequenceDefinition {
+    if (!timing) return createSequenceDefinitionBuilder();
+    return SequenceDefinition.of(timing, mapping!);
 }
-function createSequenceTiming<Entries extends SequenceTimingEntries>(entries: Entries, playback: PlaybackDescriptor): SequenceTiming<Entries> {
-    return new (SequenceTiming as any)(entries, playback, SEQUENCE_TIMING_CONSTRUCTION_LICENSE);
-}
 
-/** Builds a sequence timing; every `add` gives a new builder, so branches never share entries. */
-export class SequenceTimingBuilder<Entries extends SequenceTimingEntries = []> {
-    #entries: Entries;
+/** Timings laid out in time and bound to targets and values, ready to play any number of times. */
+export class SequenceDefinition {
+    /** @internal */
+    readonly entries: SequenceDefinitionEntries;
+    /** @internal */
+    readonly timing: SequenceTiming;
 
-    private constructor(entries: Entries, license?: typeof SEQUENCE_TIMING_CONSTRUCTION_LICENSE) {
-        if (license !== SEQUENCE_TIMING_CONSTRUCTION_LICENSE)
-            throw new TypeError(isProduction() ? "Illegal constructor" : `Use ${SequenceTiming.name}.${SequenceTiming.builder.name} to create a ${SequenceTimingBuilder.name}.`);
-        this.#entries = entries;
+    private constructor(entries: SequenceDefinitionEntries, timing: SequenceTiming, license?: typeof SEQUENCE_DEFINITION_CONSTRUCTION_LICENSE) {
+        if (license !== SEQUENCE_DEFINITION_CONSTRUCTION_LICENSE)
+            throw new TypeError(isProduction() ? "Illegal constructor" : `A ${SequenceDefinition.name} can only be created using ${SequenceDefinitionBuilder.name} or ${SequenceDefinition.name}.${SequenceDefinition.of.name}.`);
+        this.entries = entries;
+        this.timing = timing;
     }
 
-    #addEntry<Entry extends SequenceTimingEntry>(entry: Entry): SequenceTimingBuilder<[...Entries, Entry]> {
-        return new SequenceTimingBuilder<[...Entries, Entry]>([...this.#entries, entry], SEQUENCE_TIMING_CONSTRUCTION_LICENSE);
+    /** A sequence timing bound to its mapping; every entry must be mapped, and every animation's values must take one of the forms. */
+    static of<Timing extends SequenceTiming>(timing: Timing, mapping: SequenceMapping<Timing>): SequenceDefinition {
+        return createSequenceDefinition(definitionEntriesOf(timing, mapping), timing);
+    }
+}
+
+/** An entry as it's added, before the unnamed ones get their names. */
+interface PendingEntry {
+    name: string | undefined;
+    at: At | undefined;
+    definition: Definition;
+}
+
+type InlineEntryArgs = [
+    target: Target,
+    values: AnimationValues,
+    timing: AnimationTiming | AnimationTimingOptions,
+    placement?: EntryPlacementOptions<string, string>
+];
+type DefinitionEntryArgs = [definition: Definition, placement?: EntryPlacementOptions<string, string>];
+
+/** Builds a sequence definition; every `add` gives a new builder, and positions can refer to the entries named before them. */
+export class SequenceDefinitionBuilder<Names extends string = never> {
+    private constructor(private readonly entries: readonly PendingEntry[], license?: typeof SEQUENCE_DEFINITION_CONSTRUCTION_LICENSE) {
+        if (license !== SEQUENCE_DEFINITION_CONSTRUCTION_LICENSE)
+            throw new TypeError(isProduction() ? "Illegal constructor" : `Use ${sequence.name} to create a ${SequenceDefinitionBuilder.name}.`);
     }
 
-    add<Name extends string>(
+    add<N extends string = never>(
+        target: Target,
+        values: AnimationValues,
         timing: AnimationTiming | AnimationTimingOptions,
-        name: Name,
-        at?: At<EntryNames<Entries>>
-    ): SequenceTimingBuilder<[...Entries, AnimationTimingEntry<Name, EntryNames<Entries>>]>;
-
-    // add<N extends string, A extends TimedTweenTiming<string[]>>(
-    //     timing: A,
-    //     name: N,
-    //     at?: At<keyof SE & string>
-    // ): SequenceTimingBuilder<SE & { [_ in N]: TimedTweenTimingEntry<A, keyof SE & string> }>;
-
-    add<Name extends string, Subsequence extends SequenceTiming>(
-        sequence: Subsequence,
-        name: Name,
-        at?: At<EntryNames<Entries>>
-    ): SequenceTimingBuilder<[...Entries, SubsequenceTimingEntry<Name, Subsequence, EntryNames<Entries>>]>;
-
-    add<Name extends string>(
-        timing: AnimationTiming | AnimationTimingOptions | SequenceTiming,
-        name: Name,
-        at?: At
-    ): SequenceTimingBuilder<[...Entries, SequenceTimingEntry]> {
-        const earlierNames = this.#entries.map(entry => entry.name);
-        checkNewName(name, earlierNames);
-        const position = parsePositionDescriptor(at ?? '>');
-        checkPositionDescriptor(position, earlierNames, `Entry "${name}"`);
-
-        return this.#addEntry(timing instanceof SequenceTiming
-            ? {name, sequence: timing, position}
-            : {name, animation: timing instanceof AnimationTiming ? timing : AnimationTiming.of(timing), position});
+        placement?: EntryPlacementOptions<N, Names>
+    ): SequenceDefinitionBuilder<Names | N>;
+    add<N extends string = never>(
+        definition: Definition,
+        placement?: EntryPlacementOptions<N, Names>
+    ): SequenceDefinitionBuilder<Names | N>;
+    add(...args: InlineEntryArgs | DefinitionEntryArgs): SequenceDefinitionBuilder<string> {
+        const [definition, {name, at}] = this.#isDefinitionEntry(args) ? [args[0], args[1] ?? {}] : this.#inlineEntryOf(args);
+        return new SequenceDefinitionBuilder([...this.entries, {name, at, definition}], SEQUENCE_DEFINITION_CONSTRUCTION_LICENSE);
     }
 
-    build(options: PlaybackOptions = {}): SequenceTiming<Entries> {
-        if (this.#entries.length === 0)
-            throw new Error("A sequence needs at least one entry.");
-        checkPlaybackOptions(options, "The sequence");
-        return createSequenceTiming(this.#entries, playbackDescriptorOf(options));
+    #isDefinitionEntry(args: InlineEntryArgs | DefinitionEntryArgs): args is DefinitionEntryArgs {
+        return args[0] instanceof AnimationDefinition || args[0] instanceof SequenceDefinition;
     }
-}
-
-/** Named timings laid out in time, without targets or values. */
-export class SequenceTiming<Entries extends SequenceTimingEntries = SequenceTimingEntries> {
-    private constructor(
-        readonly entries: Entries,
-        readonly playback: PlaybackDescriptor,
-        license?: typeof SEQUENCE_TIMING_CONSTRUCTION_LICENSE
-    ) {
-        if (license !== SEQUENCE_TIMING_CONSTRUCTION_LICENSE)
-            throw new TypeError(isProduction() ? "Illegal constructor" : `A ${SequenceTiming.name} can only be created using ${SequenceTimingBuilder.name}.`);
+    /** The inline entry's animation, and its placement. */
+    #inlineEntryOf([target, values, timing, placement = {}]: InlineEntryArgs): [AnimationDefinition, EntryPlacementOptions<string, string>] {
+        return [new AnimationDefinition(target, values, timing), placement];
     }
 
-    static builder() {
-        return createSequenceTimingBuilder();
+    /** Names the unnamed entries in order, as `a` to `z`, then `aa` and on, skipping the names given. */
+    build(options: PlaybackOptions = {}): SequenceDefinition {
+        const givenNames = new Set(this.givenNames);
+        let builder: SequenceTimingBuilder<SequenceTimingEntries> = SequenceTiming.builder();
+        const entries: SequenceDefinitionEntry[] = [];
+        let ordinal = 0;
+        const nextUnnamedName = () => {
+            let name: string;
+            do name = alphabeticNameOf(ordinal++);
+            while (givenNames.has(name));
+            return name;
+        };
+        for (const {name: givenName, at, definition} of this.entries) {
+            const name = givenName ?? nextUnnamedName();
+            if (definition instanceof SequenceDefinition) {
+                builder = builder.add(definition.timing, name, at);
+                entries.push({name, sequence: definition});
+            } else {
+                builder = builder.add(definition.timing, name, at);
+                entries.push({name, animation: definition});
+            }
+        }
+        return createSequenceDefinition(entries, builder.build(options));
+    }
+
+    private get givenNames(): string[] {
+        return this.entries.flatMap(({name}) => name === undefined ? [] : [name]);
     }
 }
 
-/** A name must be unique among the entries before it, and only contain letters, digits and underscores. */
-export function checkNewName(name: string, earlierNames: readonly string[]): void {
-    if (earlierNames.includes(name))
-        throw new Error(`An entry named "${name}" already exists in this sequence.`);
-    if (!/^\w+$/.test(name))
-        throw new Error(`The entry name "${name}" can only contain letters, digits and underscores.`);
+/** The definitions of a sequence timing's entries, made from its mapping, which must map every entry. */
+function definitionEntriesOf<Timing extends SequenceTiming>(timing: Timing, mapping?: SequenceMapping<Timing>, path?: EntryPath): SequenceDefinitionEntries {
+    if (!mapping) throw new TypeError(path ? `No mapping present for "${path}".` : "No mapping present.");
+    const entries: SequenceDefinitionEntry[] = [];
+    for (const entry of timing.entries) {
+        const entryPath = entryPathOf(path, entry.name);
+        const entryMapping = mapping[entry.name];
+        if (!entryMapping) throw new TypeError(`No mapping present for "${entryPath}".`);
+        if ('sequence' in entry) {
+            const subsequenceEntries = definitionEntriesOf(entry.sequence, entryMapping as SequenceMapping, entryPath);
+            entries.push({name: entry.name, sequence: createSequenceDefinition(subsequenceEntries, entry.sequence)});
+            continue;
+        }
+        if (!Array.isArray(entryMapping)) throw new TypeError(`The mapping of "${entryPath}" needs a target and values.`);
+        const [target, values] = entryMapping as AnimationMapping;
+        if (target === undefined || values === undefined)
+            throw new TypeError(`The mapping of "${entryPath}" needs a target and values.`);
+        entries.push({name: entry.name, animation: new AnimationDefinition(target, values, entry.animation)});
+    }
+    return entries;
+}
+
+/** `a` for 0 to `z` for 25, then `aa`, `ab` and on. */
+function alphabeticNameOf(index: number): string {
+    let name = '';
+    for (let remaining = index + 1; remaining > 0; remaining = Math.floor((remaining - 1) / 26))
+        name = String.fromCharCode('a'.charCodeAt(0) + (remaining - 1) % 26) + name;
+    return name;
 }

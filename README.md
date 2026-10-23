@@ -96,7 +96,7 @@ It returns an `AnimationDefinition`. Nothing is looked up or read until you play
 - The **scope** is the element you pass to `animator({scope})`. It defaults to `document.documentElement`.
 - A function can return one element, or any iterable of them, such as an array or a `NodeList`.
 - Each element is animated once, even if the target lists it twice.
-- A target that matches no elements throws when you play.
+- A target that matches no elements plays nothing. In a sequence, its entry keeps its position and takes no time there.
 
 ### Values
 
@@ -122,7 +122,7 @@ animation('.card', {
 | `[null, 1]` | from the value underneath, to 1, the same as `1` |
 
 - **The value underneath** is what the property would show at that moment without this animation: the value an earlier animation leaves it at, or, with none, the property's current value when you call `animate()`.
-- `null` stands for the value underneath. It's only allowed at the start or the end.
+- `null` at the start or the end stands for the value underneath. Between them, it's skipped.
 - Keys outside 0–1 throw.
 
 **Numbers and units.**
@@ -382,7 +382,7 @@ const page = sequence()
 
 ### Staggered sequences
 
-A sequence's `delay` can be a stagger. The sequence then plays once for each element index: the copy at index 2 plays the third element of each of its animations, and its positions chain within that copy alone.
+A sequence's `delay` can be a stagger. The sequence then plays once for each element index: the copy at index 2 plays the third element of each of its animations. A subsequence in it plays as a whole, as one element. Every copy plays its entries at the times they'd have without the stagger, and the stagger delays the whole copy.
 
 ```ts
 const cards = sequence()
@@ -394,8 +394,8 @@ animator().animate(cards);
 ```
 
 - Each card's icon fades in once that card has lifted.
-- Every animation inside a staggered sequence needs as many elements as the others, or playing throws.
-- A stagger inside it gives each index its own delay, which pushes that entry on in that copy only.
+- The stagger runs over the largest number of elements of any of its entries, a subsequence counting as one. An entry with fewer elements lines up with it at the stagger's `from`: its first elements with the first ones for `'first'`, its middle with the middle for `'center'`, and its last with the last for `'last'`. Without a `from`, as with your own function or an index `from`, its first elements line up.
+- A stagger inside it works as it does in any sequence: the entries after it wait for its latest element, in every copy.
 
 ### Overlaps
 

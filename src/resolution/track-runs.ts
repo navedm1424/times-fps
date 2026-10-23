@@ -1,22 +1,24 @@
 import type {Easing} from "../easing.ts";
 import {linear} from "../easing-specifier.ts";
 import type {Progress, Seconds} from "../types.ts";
-import {PropertyStops, type StopValue} from "./stops.ts";
+import type {CSSValue} from "../dom/mapping.ts";
 import type {RepeatOptions} from "../playback-options.ts";
+import {TweenStops} from "../tween-stops.ts";
+import type {NumericStops} from "./stops.ts";
 
 /** A stretch of a track whose value follows the stops through the easing. */
 export interface TrackSpan {
     start: Seconds;
     end: Seconds;
     easing: Easing;
-    stops: PropertyStops;
+    stops: TweenStops;
 }
 
 /** Spans laid out one after another, without gaps. */
 export class TrackRun {
     constructor(readonly spans: readonly TrackSpan[]) {}
 
-    static play(duration: Seconds, easing: Easing, stops: PropertyStops): TrackRun {
+    static play(duration: Seconds, easing: Easing, stops: TweenStops): TrackRun {
         return new TrackRun([{start: 0, end: duration, easing, stops}]);
     }
 
@@ -37,24 +39,27 @@ export class TrackRun {
     }
 
     /** The value of the stop the run ends on, which is the end of its last span's easing window. */
-    get endValue(): StopValue {
+    get endValue(): CSSValue | null {
         const {easing, stops} = this.spans.at(-1)!;
-        return stops.valueOfStopAt(easing.windowEnd);
+        const value = stops.get(easing.windowEnd);
+        if (value === undefined) throw new Error(`There's no stop at ${easing.windowEnd}.`);
+        return value;
     }
 
-    /** The value at `time`, which is the next span's start where two meet; the stops must be resolved. */
-    valueAt(time: Seconds): number {
+    /** The value at `time`, which is the next span's start where two meet, with each span's stops as numbers. */
+    valueAt(time: Seconds, numericStopsOf: (stops: TweenStops) => NumericStops): number {
         const {stops, progress} = this.progressAt(time);
-        return stops.valueAt(progress);
+        return numericStopsOf(stops).valueAt(progress);
     }
 
     /** The value at `time` when it's exactly a stop's, as it is at a whole span's ends and through a hold. */
-    stopValueAt(time: Seconds): StopValue | undefined {
+    stopValueAt(time: Seconds): CSSValue | null | undefined {
         const {stops, progress} = this.progressAt(time);
-        return stops.stopValueAt(progress);
+        const [value, ...otherValues] = new Set(stops.stops.map(({value}) => value));
+        return otherValues.length === 0 ? value : stops.get(progress);
     }
 
-    private progressAt(time: Seconds): { stops: PropertyStops; progress: Progress } {
+    private progressAt(time: Seconds): { stops: TweenStops; progress: Progress } {
         const span = [...this.spans].reverse().find(span => span.start <= time) ?? this.spans[0]!;
         const {start, end, easing, stops} = span;
         if (time >= end) return {stops, progress: easing.endProgress};
@@ -71,7 +76,7 @@ export class TrackRun {
     }
 
     /** Holds `value` from `time` until the run starts. */
-    heldFrom(time: Seconds, value: StopValue): TrackRun {
+    heldFrom(time: Seconds, value: CSSValue | null): TrackRun {
         return new TrackRun([...holdSpans(value, time, this.start), ...this.spans]);
     }
 
@@ -87,12 +92,12 @@ export class TrackRun {
             start: iterationDuration - end,
             end: iterationDuration - start,
             easing: repeatMode === 'reverse' ? easing.reversed() : easing,
-            stops: repeatMode === 'reverse' ? stops : stops.flip()
+            stops: repeatMode === 'reverse' ? stops : stops.reverse()
         }));
         return new TrackRun(flipped.reverse()).shifted(iterationStart);
     }
 }
 
-function holdSpans(value: StopValue, start: Seconds, end: Seconds): TrackSpan[] {
-    return end > start ? [{start, end, easing: linear, stops: PropertyStops.constant(value)}] : [];
+function holdSpans(value: CSSValue | null, start: Seconds, end: Seconds): TrackSpan[] {
+    return end > start ? [{start, end, easing: linear, stops: TweenStops.constant(value)}] : [];
 }
