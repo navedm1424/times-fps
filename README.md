@@ -321,7 +321,7 @@ An entry's `at` says when it starts: a **reference point**, then up to three **o
 | `+0.2`, `-0.3` | seconds, later or earlier |
 
 - **The reference duration** is the referenced entry's duration, or, for `<<` and `>>`, the time from the start of the sequence until everything so far has ended.
-- **An entry's duration** runs from when it first starts to when it ends, repeats included.
+- **An entry starts** at its position, before its `delay`, and **its duration** runs from there to when it ends, its delay and repeats included.
 - **A number** is seconds from the start of the sequence: `1.5` is the same as `'<<+1.5'`.
 - **Offsets add up.** `'<+50%-=50%+0.1'` centres this entry halfway through the previous one, then moves it 0.1 seconds later.
 

@@ -1,7 +1,7 @@
 import {CubicBezier} from "./cubic-bezier.ts";
 import type {DampedSpring} from "./damped-spring.ts";
 import type {Progress, Seconds} from "./types.ts";
-import {invLerp, lerp, solveMonotone} from "./utils/math.ts";
+import {clamp, invLerp, lerp, solveMonotone} from "./utils/math.ts";
 import {checkNumber} from "./utils/validation.ts";
 
 export type CubicBezierEasingParams = readonly [x1: number, y1: number, x2: number, y2: number];
@@ -53,7 +53,7 @@ export abstract class Easing {
     offsetsAt(progress: Progress): number[] {
         return this.offsetsOf(this.inputsAt(progress))
             .filter(offset => offset >= -offsetTolerance && offset <= 1 + offsetTolerance)
-            .map(offset => Math.min(Math.max(offset, 0), 1));
+            .map(offset => clamp(offset, 0, 1));
     }
 
     /** The part of the window between the two offsets, which runs backwards when `endOffset` comes first. */
@@ -166,14 +166,14 @@ export class StepsEasing extends Easing {
     protected progressAtInput(input: number): Progress {
         const [count] = this.params;
         const step = Math.floor(input * count) + this.startJump;
-        return Math.min(Math.max(step, 0), this.jumpCount) / this.jumpCount;
+        return clamp(step, 0, this.jumpCount) / this.jumpCount;
     }
 
     /** The output just before the input, where a jump at the input hasn't happened yet. */
     private progressBeforeInput(input: number): Progress {
         const [count] = this.params;
         const step = Math.ceil(input * count - offsetTolerance) - 1 + this.startJump;
-        return Math.min(Math.max(step, 0), this.jumpCount) / this.jumpCount;
+        return clamp(step, 0, this.jumpCount) / this.jumpCount;
     }
 
     /** The output is right-continuous, so the edge the window enters from may need the output before a jump there. */
@@ -194,7 +194,7 @@ export class StepsEasing extends Easing {
         if (!(progress <= 1)) return [];
         const [count] = this.params;
         const step = Math.ceil(progress * this.jumpCount - offsetTolerance) - this.startJump;
-        return [Math.min(Math.max(step, 0), count) / count];
+        return [clamp(step, 0, count) / count];
     }
 
     /** The offsets strictly inside the window at which the output jumps, in order. */

@@ -4,7 +4,7 @@ import {
     CubicBezierEasing,
     type NativeKeyframe,
     plainNumberResolver,
-    planOf,
+    plan,
     SpringSplineFitter
 } from "timesfps/internals";
 import {springEasingOf} from "./spring-parameters";
@@ -76,7 +76,7 @@ const standInElement = {} as Element;
 /** The keyframes the WAAPI adapter plays the spring as, from 0 to 1. */
 function keyframesOf(transition: SpringTransitionOptions): readonly NativeKeyframe[] {
     const definition = animation(standInElement, {progress: [0, 1]}, transition);
-    const tracks = AnimationTracksResolver.resolve(planOf(definition, standInElement), plainNumberResolver);
+    const tracks = AnimationTracksResolver.resolve(plan(definition, () => [standInElement]), plainNumberResolver);
     const [effect, ...others] = tracks.get(standInElement)!.progress!;
     if (!effect || others.length > 0) throw new Error("A spring on its own should play as one effect.");
     return effect.keyframes;

@@ -392,11 +392,12 @@ Times are local to the iteration of the sequence an entry is in.
 
 | Term | Meaning |
 |---|---|
-| **First start** | The position plus the shortest delay: an animation's shortest staggered delay, or a sequence's delay. A staggered sequence's is its earliest copy's. References to an entry's start resolve to its first start. |
-| **Last referenceable end** | Finite entry: its end, after its delay and all its repeats. Infinite entry: the end of its first iteration, since infinity can't be referred to. Staggered animation: from its latest element. Sequence: from its iterations, each lasting until the latest last referenceable end among its entries. Staggered sequence: from its latest copy. |
-| **Duration** | For positions, an entry's `EntrySpan` runs from its first start to its last referenceable end. The inserted entry's doesn't depend on its position. |
+| **Start** | The entry's position, before its delay. References to an entry's start resolve to it. |
+| **Anchor duration** | From the start: the entry's delay (an animation's latest staggered delay, or a sequence's delay, or its latest copy's when it's staggered), then its plays and their repeat delays. An infinite repeat counts only its first play, since infinity can't be referred to. A sequence's play is one iteration, lasting until the latest end among its entries. What the sequence an entry is in delays it by isn't part of it. An entry with no elements has 0. |
+| **End** | The start plus the anchor duration. References to an entry's end resolve to it. |
+| **Duration** | For positions, an entry's `EntrySpan` runs from its start for its anchor duration. The inserted entry's doesn't depend on its position, so it's known before the entry is placed. |
 | **Previous entry** | The entry added just before. For the first entry, it's the start of the sequence, with a duration of 0. |
-| **Everything so far** | From 0 to the latest last referenceable end among the earlier entries, or 0 with none. |
+| **Everything so far** | From 0 to the latest end among the earlier entries, or 0 with none. |
 
 - A position that resolves below 0 becomes 0.
 - References never reach into subsequences.
@@ -408,11 +409,11 @@ A sequence whose `delay` is a stagger plays once per element index. The copy at 
 - **The stagger reaches its own entries only.** Each element of an animation entry is a copy. A subsequence is one copy as a whole: it gets one delay, at its aligned position, and its elements get nothing more from this stagger. Staggers never compound across levels; a staggered subsequence's own stagger spreads its own entries.
 
 - **Every copy is the sequence without its stagger.** Its entries' positions resolve once, as they would without the stagger, and the copy's delay then delays the whole copy. So every copy has the same iteration, and repeats play in each copy from its own delay, as a staggered animation's do.
-- **A stagger inside it,** on an animation or a subsequence, works as it does in any sequence: each element gets its delay from its index among that entry's own elements, and the entry's last referenceable end is its latest element's, in every copy.
+- **A stagger inside it,** on an animation or a subsequence, works as it does in any sequence: each element gets its delay from its index among that entry's own elements, and the entry ends after its latest element's delay, in every copy.
 - **The largest count.** The stagger runs over *N*, the largest count among its entries: an animation's element count, and 1 for a subsequence.
 - **Entries with fewer copies** line up with the largest by the stagger's origin. Copy *j* of an entry with *n* copies sits at the position *j* + *share* × (*N* − *n*), where the share is 0 for `from: 'first'`, 0.5 for `'center'` and 1 for `'last'`. A stagger without `from` (a function of your own) and an index `from` take 0. This is the `StaggerAlign` the plan uses (`src/resolution/plan.ts`).
 - **A position between two indices** isn't rounded: the stagger is called with it, so a centred row keeps its symmetry whatever its count's parity. A position outside 0 to *N* − 1 is clamped to the nearest end. Two elements may sit at the same position, and get the same delay.
-- **From outside,** the staggered sequence's first start is its earliest copy's, and its ends are its latest copy's.
+- **From outside,** the staggered sequence starts at its position, and ends after its latest copy's delay and its iterations. A copy lasts the whole iteration, even when its own elements end earlier.
 
 #### 2.7.4 Repeats in sequences
 
@@ -667,7 +668,7 @@ Every error has the type of what went wrong:
 | `src/utils/environment.ts` | `isProduction`: whether a bundler built it for production, from `process.env.NODE_ENV`; false where `process` doesn't exist |
 | `src/utils/math.ts` | Interpolation and solving monotone functions |
 | `src/utils/records.ts` | Reading numeric-keyed records in order |
-| `src/resolution/plan.ts` | `planOf`: the plan tree of starts and ends, with each animation's elements and their delays, each sequence's delay as a copy, and `StaggerAlign` |
+| `src/resolution/plan.ts` | `plan`, through `AnimationPlanner` and `SequencePlanner`: the plan tree of positions and durations, with each animation's targets and their delays, each sequence's delay as a copy, and `StaggerAlign` |
 | `src/resolution/stops.ts` | `NumericStops`: one property's values as numbers in one unit, and interpolating them |
 | `src/resolution/track-runs.ts` | `TrackSpan` and `TrackRun`: a track's values over time, and their iterations |
 | `src/dom/mapping.ts` | What binds a timing to the DOM, for any DOM adapter: targets, value forms (`RawTweenStops`), mapping types, `AnimatorOptions`, and resolving targets |
@@ -689,7 +690,7 @@ Relative imports end in `.ts`, and `rewriteRelativeImportExtensions` makes the b
 ```
 new WAAPIAnimator({scope}).animate(definition)    scope: document.documentElement by default
 │
-├─ 1. Plan         planOf(definition, scope)     → AnimationPlan | SequencePlan tree
+├─ 1. Plan         plan(definition, targetsResolver)  → AnimationPlan | SequencePlan tree
 │                  (targets resolved §5.1, every copy's delays §5.3; values stay as given §5.2)
 ├─ 2. Tracks       AnimationTracksResolver.resolve(plan, domValueResolver)
 │     ├─ a. repetitions    → ScheduledEffect[]  (spans per element and property)
@@ -705,7 +706,7 @@ The plan walks the definition tree, which holds every target and value, so nothi
 
 ### 5.1 Targets
 
-The plan resolves each animation definition's target as it reaches it, through `resolveTargets` (§3.3), and only once per definition, however many times a sequence plays it. A selector is queried in the scope, and a function is called with it. Elements are deduplicated. An animation with no elements has a play and total duration of 0, so it starts and ends at its position.
+The plan resolves each animation definition's target as it reaches it, through the `TargetsResolver` it's given. The animator's resolves each target once per `animate`, however many times a sequence plays it, through `resolveTargets` (§3.3): a selector is queried in the scope, and a function is called with it. Elements are deduplicated. An animation with no elements has a play and anchor duration of 0 and never repeats forever, so it starts and ends at its position.
 
 ### 5.2 Values
 
@@ -719,21 +720,27 @@ Nothing is resolved in place. Stage c gives each entry on each track an `EntryVa
 
 ### 5.3 Plan
 
-`planOf(definition, scope)` (`src/resolution/plan.ts`) places the definition in time: it returns a tree with the definition's levels, an `AnimationPlan` for each animation and a `SequencePlan` for each sequence. Times are local to the iteration of the sequence an entry is in, or start at 0 for the outermost definition.
+`plan(definition, targetsResolver)` (`src/resolution/plan.ts`) places the definition in time, through the internal `AnimationPlanner` and `SequencePlanner`. It returns a tree with the definition's levels, an `AnimationPlan` for each animation and a `SequencePlan` for each sequence. Times are local to the iteration of the sequence an entry is in, or start at 0 for the outermost definition.
 
 | Field | Meaning |
 |---|---|
 | `definition` | The node's definition: its timing, and an animation's `stopsByProperty` |
 | `entries` | A sequence's: each entry's node, by name, in order |
-| `position` | Where the entry is in its sequence's iteration |
-| `firstStart` | Position plus the shortest delay (an animation's shortest staggered delay, or a sequence's delay); a staggered sequence's earliest copy's |
-| `end` | Undefined when it never ends |
-| `lastReferenceableEnd` | See §2.7.2 |
-| `playDuration` | One play of an animation, or one iteration of a sequence |
+| `position` | Where the entry starts in its sequence's iteration, before its delay; 0 for the outermost definition |
+| `playDuration` | One play of an animation, or one iteration of a sequence, without delays or repeats. A sequence's includes the gaps its positions leave, from 0 to the latest end among its entries |
+| `anchorDuration` | The anchor duration (§2.7.2): the entry's delay, then its plays and repeat delays, with only the first play of an infinite repeat; not what its sequence delays it by |
+| `infinite` | Whether it repeats forever, or a sequence any of whose entries does |
 | `easing` | An animation's only: the easing its transition resolves to (§2.2) |
-| `totalDuration` | Plays and repeat delays without the delay; infinite when it never ends |
 
-Leaves also keep `targets`: each element, with its `delay`, the animation's own (its number, or its stagger at the element's index), and its `sequenceDelay`, what the sequence the animation is in delays it by. A sequence node keeps its own `sequenceDelay`, what the sequence it's in delays it by as one copy. Both are 0 for the outermost definition. A sequence with a number for its `delay` gives each entry's copies that delay. A staggered sequence gives each copy the stagger at its position (§2.7.3), sampled with the largest count among its entries. A staggered sequence has no node of its own: its entries are planned once, as they'd be without the stagger, and the stagger only lives in its entries' `sequenceDelay`s. A sequence's reach comes from the delays it gives its entries' copies. A sequence never ends if it repeats forever or if any of its entries never ends.
+Leaves also keep `targets`: each element as `target`, with its `delay`, the animation's own (its number, or its stagger at the element's index), and its `parentDelay`, what the sequence the animation is in delays it by. A sequence node keeps its own `parentDelay`, what the sequence it's in delays it by as one copy. Both are 0 for the outermost definition. A staggered sequence has no node of its own: its entries are planned once, as they'd be without the stagger, and the stagger only lives in its entries' `parentDelay`s. The two delays stay apart because the sequence's repeats sit between them: an animation's own delay is part of the sequence's iteration, while its `parentDelay` delays the copy after the sequence's repeats (§5.4).
+
+**Planning in steps.** Each planner plans one entry, once:
+1. `of(definition, targetsResolver)` takes everything that doesn't depend on where the entry sits. An `AnimationPlanner` resolves the targets, each target's own delay, the easing and the durations. A `SequencePlanner` plans its whole subtree, as below.
+2. `position(descriptor, entrySpans)` resolves the position among the entries before it, clamped to 0. A `=%` offset reads the planner's own anchor duration, which is already known.
+3. `parentDelay(delay)` takes what the sequence the entry is in delays its copies by: a number delays them all, and a function each copy from its index among the entry's `copyCount`, which is its target count for an animation and 1 for a subsequence. It changes no durations.
+4. `plan()` gives the node.
+
+`SequencePlanner.of` makes a planner for each entry and positions it, keeping each entry's `span` for the positions after it. Then it gives every entry the sequence's delay: a number as it is, and a stagger sampled where each copy lines up (§2.7.3), over the largest `copyCount`. Its anchor duration is its latest copy's delay, or its numeric delay, plus its iterations.
 
 ### 5.4 Tracks, stage a: repetitions
 
@@ -749,7 +756,7 @@ Leaves also keep `targets`: each element, with its `delay`, the animation's own 
 
 **Plays without duration.** A play of 0 seconds is a span that starts and ends at the same time. Inside a longer effect it's two keyframes at the same offset, its start values and then its end values, so the track jumps. An effect of 0 seconds has two keyframes: the start values at 0 and the end values at 1. WAAPI shows the start values before it, if it fills backwards, and the end values from its start time on.
 
-An animation shifts its repeated runs and effects by its position plus each element's `delay`. A sequence repeats each child's runs, then shifts them by the child's copy delays: each element's `sequenceDelay` for an animation, and the subsequence's `sequenceDelay` for all of a subsequence's. Then it shifts everything by its own position. So a staggered sequence's copies repeat with the same iteration, each from its own delay.
+An animation shifts its repeated runs and effects by its position plus each element's `delay`. A sequence repeats each child's runs, then shifts them by the child's copy delays: each element's `parentDelay` for an animation, and the subsequence's `parentDelay` for all of a subsequence's. Then it shifts everything by its own position. So a staggered sequence's copies repeat with the same iteration, each from its own delay.
 
 **Native layout.** For a run from `a` to `b` in iterations of `L` with repeat delay `d`, where the period is `P = L + d`:
 

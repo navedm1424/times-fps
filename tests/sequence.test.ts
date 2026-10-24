@@ -2,7 +2,7 @@ import {describe, expect, it, vi} from "vitest";
 import {AnimationTiming} from "../src/animation-timing.ts";
 import {type At, parsePositionDescriptor, resolvePosition} from "../src/at.ts";
 import {animation, AnimationDefinition} from "../src/animation.ts";
-import {planOf} from "../src/resolution/plan.ts";
+import {plan} from "../src/resolution/plan.ts";
 import {sequence, SequenceDefinition} from "../src/sequence.ts";
 import {SequenceTiming} from "../src/sequence-timing.ts";
 import {resolveTargets} from "../src/dom/mapping.ts";
@@ -129,8 +129,8 @@ describe("positions", () => {
     const element = {} as Element;
     const startsOf = (timing: SequenceTiming, names: string[]) => {
         const mapping = Object.fromEntries(names.map(name => [name, [element, {opacity: 1}]]));
-        const plan = planOf(SequenceDefinition.of(timing, mapping as never), element);
-        return Object.fromEntries(names.map(name => [name, plan.entries.get(name)!.firstStart]));
+        const sequencePlan = plan(SequenceDefinition.of(timing, mapping as never), target => resolveTargets(target, element));
+        return Object.fromEntries(names.map(name => [name, sequencePlan.entries.get(name)!.position]));
     };
 
     it("places entries after the end of everything so far", () => {

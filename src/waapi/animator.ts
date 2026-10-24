@@ -1,6 +1,6 @@
 import {Animator} from "../animator.ts";
-import type {AnimatorOptions} from "../dom/mapping.ts";
-import {planOf} from "../resolution/plan.ts";
+import {type AnimatorOptions, resolveTargets, type Target} from "../dom/mapping.ts";
+import {plan} from "../resolution/plan.ts";
 import type {Definition} from "../sequence.ts";
 import {AnimationControls} from "./controls.ts";
 import {domValueResolver, keyframePropertyOf} from "./css-values.ts";
@@ -25,8 +25,16 @@ export class WAAPIAnimator extends Animator {
     }
 
     protected animateDefinition(definition: Definition): AnimationControls {
-        const plan = planOf(definition, this.#options.scope ?? document.documentElement);
-        return new AnimationControls(WAAPIAnimator.nativeAnimationsOf(AnimationTracksResolver.resolve(plan, domValueResolver)));
+        const scope = this.#options.scope ?? document.documentElement;
+        const targetsByTarget = new Map<Target, readonly Element[]>();
+        /** Resolves each target once, however many times a sequence plays it. */
+        function targetsResolver(target: Target) {
+            let targets = targetsByTarget.get(target);
+            if (!targets) targetsByTarget.set(target, targets = resolveTargets(target, scope));
+            return targets;
+        }
+        const tracks = AnimationTracksResolver.resolve(plan(definition, targetsResolver), domValueResolver);
+        return new AnimationControls(WAAPIAnimator.nativeAnimationsOf(tracks));
     }
 
     /** Creates the effects in their tracks' order, so the ones declared later show over the earlier ones; each is named by its entry's path and its property. */

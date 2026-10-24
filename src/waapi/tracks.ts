@@ -91,11 +91,11 @@ export class AnimationTracksResolver {
 
     private static resolveAnimationRepetitions(plan: AnimationPlan, path: EntryPath | undefined, order: readonly number[], repeatingAncestor: boolean): Contribution {
         const {definition, easing, playDuration} = plan;
-        const runs = plan.targets.flatMap(({element}) => Object.entries(definition.stopsByProperty).map(([property, stops]): KeyedRun =>
-            ({element, property, path, entryStops: stops, order, run: TrackRun.play(playDuration, easing, stops)})
+        const runs = plan.targets.flatMap(({target}) => Object.entries(definition.stopsByProperty).map(([property, stops]): KeyedRun =>
+            ({element: target, property, path, entryStops: stops, order, run: TrackRun.play(playDuration, easing, stops)})
         ));
         const repeated = AnimationTracksResolver.repeated({runs, effects: []}, playDuration, definition.timing.playback, repeatingAncestor, order.length);
-        const delays = new Map(plan.targets.map(({element, delay}) => [element, delay]));
+        const delays = new Map(plan.targets.map(({target, delay}) => [target, delay]));
         return AnimationTracksResolver.shifted(repeated, ({element}) => plan.position + delays.get(element)!);
     }
 
@@ -168,9 +168,9 @@ export class AnimationTracksResolver {
 
 /** What its sequence delays each copy of the entry by, after the sequence's repeats: each element of an animation, or a subsequence as a whole. */
 function copyDelayOf(plan: PlanNode): (key: TrackKey) => Seconds {
-    if (plan.type === 'sequence') return () => plan.sequenceDelay;
-    const sequenceDelays = new Map(plan.targets.map(({element, sequenceDelay}) => [element, sequenceDelay]));
-    return ({element}) => sequenceDelays.get(element)!;
+    if (plan.type === 'sequence') return () => plan.parentDelay;
+    const parentDelays = new Map(plan.targets.map(({target, parentDelay}) => [target, parentDelay]));
+    return ({element}) => parentDelays.get(element)!;
 }
 
 /** Earlier entries come first, and an entry's own parts in their order. */

@@ -1,13 +1,13 @@
 import {describe, expect, it} from "vitest";
 import {AnimationTiming} from "../src/animation-timing.ts";
 import {animation} from "../src/animation.ts";
-import type {AnimationValues} from "../src/dom/mapping.ts";
+import {AnimationValues, resolveTargets} from "../src/dom/mapping.ts";
 import {CubicBezierEasing, type Easing, StepsEasing} from "../src/easing.ts";
 import {linear, resolveEasing} from "../src/easing-specifier.ts";
 import {NumericStops} from "../src/resolution/stops.ts";
-import {type AnimationPlan, planOf, type SequencePlan} from "../src/resolution/plan.ts";
+import {type AnimationPlan, plan, type SequencePlan} from "../src/resolution/plan.ts";
 import {SequenceDefinition} from "../src/sequence.ts";
-import {entryPathOf, type EntryPath, SequenceTiming} from "../src/sequence-timing.ts";
+import {type EntryPath, entryPathOf, SequenceTiming} from "../src/sequence-timing.ts";
 import type {PlaybackOptions, RepeatOptions} from "../src/playback-options.ts";
 import {stagger} from "../src/stagger.ts";
 import {resolveTransition, type TransitionOptions} from "../src/transition.ts";
@@ -40,7 +40,7 @@ function reversedOf(stops: NumericStops): NumericStops {
 }
 
 function animationPlanOf(timing: AnimationTiming, elements: readonly Element[], values: AnimationValues = line): AnimationPlan {
-    return planOf(animation(elements, values, timing), scope);
+    return plan(animation(elements, values, timing), target => resolveTargets(target, scope));
 }
 
 /** The timing's definition, with each animation leaf's values and elements by its path; a leaf without elements given has `element`. */
@@ -53,7 +53,7 @@ function sequencePlanOf(
         const entryPath = entryPathOf(path, entry.name);
         return [entry.name, 'sequence' in entry ? mappingOf(entry.sequence, entryPath) : [elementsByPath[entryPath] ?? [element], valuesByPath[entryPath]]];
     }));
-    return planOf(SequenceDefinition.of(timing, mappingOf(timing, undefined) as never), scope);
+    return plan(SequenceDefinition.of(timing, mappingOf(timing, undefined) as never), target => resolveTargets(target, scope));
 }
 
 function animationTracksOf(timing: AnimationTiming, values: AnimationValues = line, elements = [element], resolver = numericResolver): AnimationTracks {
@@ -149,57 +149,78 @@ function definedValueAt(easing: Easing, stops: NumericStops, playDuration: numbe
     return reversedOf(stops).valueAt(easedProgressAt(easing, x));
 }
 
-describe("planOf", () => {
+describe("plans", () => {
     const threeElements = [{} as Element, {} as Element, {} as Element];
 
-    it("starts an timing at its shortest staggered delay and ends it after its latest", () => {
+    it("places an animation at its position, and ends it after its latest delay", () => {
         const timing = AnimationTiming.of({duration: 1}, {delay: index => 0.25 + index * 0.5, repeat: 1, repeatDelay: 0.5});
-        expect(animationPlanOf(timing, threeElements)).toMatchObject({
-            firstStart: 0.25, playDuration: 1, totalDuration: 2.5, end: 3.75, lastReferenceableEnd: 3.75
-        });
+        expect(animationPlanOf(timing, threeElements)).toMatchObject({position: 0, playDuration: 1, anchorDuration: 3.75, infinite: false});
     });
 
-    it("leaves an infinite timing without an end, referenceable after its first play", () => {
+    it("counts only the first play of an infinite animation", () => {
         const timing = AnimationTiming.of({duration: 1}, {delay: 0.5, repeat: Infinity});
-        expect(animationPlanOf(timing, [element])).toMatchObject({firstStart: 0.5, end: undefined, lastReferenceableEnd: 1.5, totalDuration: Infinity});
+        expect(animationPlanOf(timing, [element])).toMatchObject({playDuration: 1, anchorDuration: 1.5, infinite: true});
     });
 
-    it("resolves the targets, and gives each element its delay", () => {
+    it("resolves the targets, and gives each its delay", () => {
         const timing = AnimationTiming.of({duration: 1}, {delay: index => index * 0.5});
-        expect(animationPlanOf(timing, threeElements).targets).toEqual(threeElements.map((element, index) => ({element, delay: index * 0.5, sequenceDelay: 0})));
+        expect(animationPlanOf(timing, threeElements).targets).toEqual(threeElements.map((target, index) => ({target, delay: index * 0.5, parentDelay: 0})));
     });
 
-    it("places entries in their sequence's iteration and repeats the iteration", () => {
+    it("refers to an entry's start before its delay, and repeats the sequence's iteration", () => {
         const sequence = SequenceTiming.builder()
             .add(AnimationTiming.of({duration: 1}), 'a')
             .add(AnimationTiming.of({duration: 2}, {delay: 0.25}), 'b', '+0.5')
             .add(AnimationTiming.of({duration: 1}), 'c', 'b<+0')
             .build({delay: 1, repeat: 1, repeatDelay: 0.5});
-        const plan = sequencePlanOf(sequence, {a: line, b: line, c: line});
-        expect(plan.entries.get('b')).toMatchObject({firstStart: 1.75, end: 3.75, lastReferenceableEnd: 3.75});
-        expect(plan.entries.get('c')).toMatchObject({firstStart: 1.75, end: 2.75});
-        expect(plan).toMatchObject({firstStart: 1, playDuration: 3.75, totalDuration: 8, end: 9, lastReferenceableEnd: 9});
+        const sequencePlan = sequencePlanOf(sequence, {a: line, b: line, c: line});
+        expect(sequencePlan.entries.get('b')).toMatchObject({position: 1.5, anchorDuration: 2.25});
+        expect(sequencePlan.entries.get('c')).toMatchObject({position: 1.5, anchorDuration: 1});
+        expect(sequencePlan).toMatchObject({position: 0, playDuration: 3.75, anchorDuration: 9, infinite: false});
     });
 
-    it("keeps an entry with no elements at its position, taking no time there, however it repeats", () => {
+    it("measures a share of an entry from its position, its delay included", () => {
+        const sequence = SequenceTiming.builder()
+            .add(AnimationTiming.of({duration: 1}, {delay: 1}), 'a')
+            .add(AnimationTiming.of({duration: 1}), 'b', 'a<+50%')
+            .add(AnimationTiming.of({duration: 2}), 'c', 'b>-=50%')
+            .build();
+        const sequencePlan = sequencePlanOf(sequence, {a: line, b: line, c: line});
+        expect(sequencePlan.entries.get('b')).toMatchObject({position: 1});
+        expect(sequencePlan.entries.get('c')).toMatchObject({position: 1});
+    });
+
+    it("keeps an entry with no targets at its position, taking no time there, however it repeats", () => {
         const sequence = SequenceTiming.builder()
             .add(AnimationTiming.of({duration: 1}), 'a')
-            .add(AnimationTiming.of({duration: 1}, {repeat: Infinity}), 'b', '>+2')
+            .add(AnimationTiming.of({duration: 1}, {delay: 1, repeat: Infinity}), 'b', '>+2')
             .add(AnimationTiming.of({duration: 1}), 'c', 'b>')
             .add(AnimationTiming.of({duration: 1}), 'd', '>>+1')
             .build();
-        const plan = sequencePlanOf(sequence, {a: line, b: line, c: line, d: line}, {b: [], d: []});
-        expect(plan.entries.get('b')).toMatchObject({targets: [], firstStart: 3, end: 3, lastReferenceableEnd: 3, playDuration: 0, totalDuration: 0});
-        expect(plan.entries.get('c')).toMatchObject({firstStart: 3, end: 4});
-        expect(plan.entries.get('d')).toMatchObject({firstStart: 5, end: 5});
-        expect(plan).toMatchObject({playDuration: 5, end: 5});
+        const sequencePlan = sequencePlanOf(sequence, {a: line, b: line, c: line, d: line}, {b: [], d: []});
+        expect(sequencePlan.entries.get('b')).toMatchObject({targets: [], position: 3, playDuration: 0, anchorDuration: 0, infinite: false});
+        expect(sequencePlan.entries.get('c')).toMatchObject({position: 3, anchorDuration: 1});
+        expect(sequencePlan.entries.get('d')).toMatchObject({position: 5, anchorDuration: 0});
+        expect(sequencePlan).toMatchObject({playDuration: 5, anchorDuration: 5});
     });
 
-    it("leaves a sequence with an infinite entry without an end", () => {
+    it("counts the first play of an infinite entry, and makes its sequence infinite", () => {
         const sequence = SequenceTiming.builder()
             .add(AnimationTiming.of({duration: 1}, {repeat: Infinity}), 'a')
             .build({repeat: 1});
-        expect(sequencePlanOf(sequence, {a: line})).toMatchObject({playDuration: 1, end: undefined, totalDuration: Infinity, lastReferenceableEnd: 2});
+        expect(sequencePlanOf(sequence, {a: line})).toMatchObject({playDuration: 1, anchorDuration: 2, infinite: true});
+    });
+
+    it("leaves what a sequence's stagger delays its entries by out of their durations, and adds its latest copy's to the sequence's", () => {
+        const sequence = SequenceTiming.builder()
+            .add(AnimationTiming.of({duration: 1}), 'cards')
+            .add(AnimationTiming.of({duration: 4}), 'title', 0)
+            .add(AnimationTiming.of({duration: 1}), 'after', 'cards>')
+            .build({delay: index => index * 0.5});
+        const sequencePlan = sequencePlanOf(sequence, {cards: line, title: line, after: line}, {cards: threeElements});
+        expect(sequencePlan.entries.get('cards')).toMatchObject({position: 0, anchorDuration: 1});
+        expect(sequencePlan.entries.get('after')).toMatchObject({position: 1});
+        expect(sequencePlan).toMatchObject({playDuration: 4, anchorDuration: 5});
     });
 });
 

@@ -13,6 +13,11 @@ export function remap(value: number, fromStart: number, fromEnd: number, toStart
     return lerp(toStart, toEnd, invLerp(fromStart, fromEnd, value));
 }
 
+/** `value` kept within `low`–`high`. */
+export function clamp(value: number, low: number, high: number): number {
+    return Math.min(Math.max(value, low), high);
+}
+
 /**
  * The input between `low` and `high` at which `fn`, which only rises or only falls there, reaches `target`:
  * Newton's method kept inside a shrinking bracket, bisecting whenever a step leaves it.

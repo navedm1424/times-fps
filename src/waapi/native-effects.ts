@@ -8,7 +8,7 @@ import type {TrackRun, TrackSpan} from "../resolution/track-runs.ts";
 import type {EntryPath} from "../sequence-timing.ts";
 import type {TweenStops} from "../tween-stops.ts";
 import type {Progress, Seconds} from "../types.ts";
-import {invLerp, lerp} from "../utils/math.ts";
+import {clamp, invLerp, lerp} from "../utils/math.ts";
 import {sortedEntriesOf} from "../utils/records.ts";
 import type {EntryValues} from "./effect-chains.ts";
 import type {LinearPoint, NativeEasing} from "./native-easing.ts";
@@ -159,7 +159,7 @@ function keyframesOf(spans: readonly TrackSpan[], duration: Seconds, piecesOf: (
     // Rounding may leave offsets a hair outside 0–1 or out of order, which WAAPI rejects.
     let previousOffset = 0;
     for (const keyframe of keyframes)
-        previousOffset = keyframe.offset = Math.min(Math.max(keyframe.offset, previousOffset), 1);
+        previousOffset = keyframe.offset = clamp(keyframe.offset, previousOffset, 1);
     return keyframes;
 }
 
@@ -323,7 +323,7 @@ function stretchedPiecesOf(curve: CubicBezier): StretchedPiece[] {
     const inflection = curve.inflectionParameter('x');
     const fitsInTime = isWithinTime(x1) && isWithinTime(x2);
     const parts = fitsInTime || inflection === undefined || inflection <= 0 || inflection >= 1 ? [curve] : curve.splitAt(inflection);
-    const clampToTime = (x: number) => Math.min(Math.max(x, 0), 1);
+    const clampToTime = (x: number) => clamp(x, 0, 1);
     return parts.map(part => {
         const [x1, y1, x2, y2] = stretchedDefinitionOf(part);
         return {
